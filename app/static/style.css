@@ -168,20 +168,23 @@ h1 {
 }
 
 .workspace {
-  display: grid;
-  grid-template-columns: minmax(340px, 400px) minmax(0, 1fr);
+  display: flex;
   gap: 22px;
-  align-items: start;
+  align-items: flex-start;
 }
 
 .workspace-left {
+  flex: 0 0 400px;
+  max-width: 400px;
   position: sticky;
   top: 20px;
 }
 
 .workspace-right {
+  flex: 1 1 0;
   min-width: 0;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 20px;
 }
 
@@ -402,16 +405,16 @@ h2 {
 }
 
 .player-hero {
-  display: grid;
-  grid-template-columns: 174px minmax(0, 1fr);
+  display: flex;
   gap: 24px;
   align-items: center;
 }
 
 .cover-art {
   position: relative;
-  aspect-ratio: 1;
-  width: 100%;
+  flex: 0 0 174px;
+  width: 174px;
+  height: 174px;
   border-radius: 24px;
   overflow: hidden;
   display: grid;
@@ -498,6 +501,7 @@ h2 {
 }
 
 .player-detail {
+  flex: 1 1 0;
   min-width: 0;
 }
 
@@ -1131,13 +1135,22 @@ textarea:focus-visible {
 
 @media (max-width: 1080px) {
   .workspace {
-    grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);
     gap: 18px;
   }
 
+  .workspace-left {
+    flex-basis: 360px;
+    max-width: 360px;
+  }
+
   .player-hero {
-    grid-template-columns: 140px minmax(0, 1fr);
     gap: 18px;
+  }
+
+  .cover-art {
+    flex-basis: 140px;
+    width: 140px;
+    height: 140px;
   }
 
   .cover-note {
@@ -1145,16 +1158,20 @@ textarea:focus-visible {
   }
 }
 
-@media (max-width: 980px) {
+@media (max-width: 860px) {
   .workspace {
-    grid-template-columns: minmax(0, 1fr);
+    flex-direction: column;
   }
 
   .workspace-left {
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: none;
     position: static;
   }
 
   .workspace-right {
+    width: 100%;
     gap: 16px;
   }
 
@@ -1225,9 +1242,14 @@ textarea:focus-visible {
   }
 
   .player-hero {
-    grid-template-columns: 104px minmax(0, 1fr);
     gap: 14px;
-    align-items: start;
+    align-items: flex-start;
+  }
+
+  .cover-art {
+    flex-basis: 104px;
+    width: 104px;
+    height: 104px;
   }
 
   .cover-art {
@@ -1342,9 +1364,14 @@ textarea:focus-visible {
   }
 
   .player-hero {
-    grid-template-columns: 96px minmax(0, 1fr);
     gap: 12px;
-    align-items: start;
+    align-items: flex-start;
+  }
+
+  .cover-art {
+    flex-basis: 96px;
+    width: 96px;
+    height: 96px;
   }
 
   .cover-note {
@@ -1395,11 +1422,12 @@ textarea:focus-visible {
   }
 
   .workspace {
-    grid-template-columns: 340px minmax(0, 1fr);
     gap: 12px;
   }
 
   .workspace-left {
+    flex-basis: 340px;
+    max-width: 340px;
     position: static;
   }
 
@@ -1442,9 +1470,14 @@ textarea:focus-visible {
   }
 
   .player-hero {
-    grid-template-columns: 104px minmax(0, 1fr);
     gap: 14px;
-    align-items: start;
+    align-items: flex-start;
+  }
+
+  .cover-art {
+    flex-basis: 104px;
+    width: 104px;
+    height: 104px;
   }
 
   .cover-art {
