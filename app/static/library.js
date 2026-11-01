@@ -1,15 +1,8 @@
 (function () {
   "use strict";
 
+  var L = window.LinkAudio;
   var els = {
-    shareText: document.getElementById("shareText"),
-    extractCard: document.getElementById("extractCard"),
-    extractBtn: document.getElementById("extractBtn"),
-    extractLabel: document.querySelector("#extractBtn .btn-label"),
-    extractProgress: document.getElementById("extractProgress"),
-    progressLabel: document.getElementById("progressLabel"),
-    progressElapsed: document.getElementById("progressElapsed"),
-    notice: document.getElementById("notice"),
     playerCard: document.getElementById("playerCard"),
     playToggle: document.getElementById("playToggle"),
     playIcon: document.getElementById("playIcon"),
@@ -37,123 +30,10 @@
     items: [],
     nodes: new Map(),
     currentId: null,
-    extracting: false,
     loadingList: false,
     pendingDelete: null,
     lastFocus: null,
-    toastTimer: null,
-    progressTimer: null,
-    progressStart: 0,
   };
-
-  var platformLabels = {
-    douyin: "抖音",
-  };
-
-  var dateFormatter = null;
-  try {
-    dateFormatter = new Intl.DateTimeFormat("zh-CN", {
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch (error) {
-    dateFormatter = null;
-  }
-
-  function api(path, options) {
-    var opts = options || {};
-    var headers = Object.assign({ Accept: "application/json" }, opts.headers || {});
-    if (opts.body) {
-      headers["Content-Type"] = "application/json";
-    }
-
-    return fetch(path, Object.assign({}, opts, { headers: headers, cache: "no-store" }))
-      .catch(function () {
-        throw new Error("无法连接服务器，请检查网络或服务是否在运行");
-      })
-      .then(function (response) {
-        var contentType = response.headers.get("content-type") || "";
-        var payloadPromise = contentType.indexOf("application/json") >= 0
-          ? response.json().catch(function () { return null; })
-          : Promise.resolve(null);
-
-        return payloadPromise.then(function (payload) {
-          if (!response.ok) {
-            var detail = payload && payload.detail;
-            var message = "";
-            if (typeof detail === "string") {
-              message = detail;
-            } else if (detail && detail.message) {
-              message = detail.message;
-            } else if (payload && payload.message) {
-              message = payload.message;
-            } else if (response.status === 429) {
-              message = "服务器正忙，请稍后重试";
-            } else {
-              message = "请求失败（HTTP " + response.status + "）";
-            }
-            var error = new Error(message);
-            error.status = response.status;
-            throw error;
-          }
-          return payload;
-        });
-      });
-  }
-
-  function formatDuration(seconds) {
-    if (typeof seconds !== "number" || !isFinite(seconds) || seconds <= 0) {
-      return "时长未知";
-    }
-    var total = Math.floor(seconds + 0.5);
-    var hours = Math.floor(total / 3600);
-    var minutes = Math.floor((total % 3600) / 60);
-    var secs = total % 60;
-    if (hours > 0) {
-      return hours + ":" + pad2(minutes) + ":" + pad2(secs);
-    }
-    return minutes + ":" + pad2(secs);
-  }
-
-  function pad2(value) {
-    return value < 10 ? "0" + value : String(value);
-  }
-
-  function formatDate(iso) {
-    if (!iso) {
-      return "时间未知";
-    }
-    var date = new Date(iso);
-    if (isNaN(date.getTime())) {
-      return iso;
-    }
-    try {
-      return dateFormatter ? dateFormatter.format(date) : date.toLocaleString();
-    } catch (error) {
-      return date.toLocaleString();
-    }
-  }
-
-  function platformName(platform) {
-    if (!platform) {
-      return "未知平台";
-    }
-    return platformLabels[platform] || platform;
-  }
-
-  function sourceLabel(item) {
-    var source;
-    if (item.source_kind === "video_ffmpeg") {
-      source = "视频完整音轨";
-    } else if (item.source_kind === "music_transcoded") {
-      source = item.media_type === "image" ? "图文原声（转码）" : "原声（转码）";
-    } else {
-      source = item.media_type === "image" ? "图文原声" : "作品原声";
-    }
-    return platformName(item.platform) + " · " + source;
-  }
 
   function findItem(id) {
     for (var i = 0; i < state.items.length; i += 1) {
@@ -162,78 +42,6 @@
       }
     }
     return null;
-  }
-
-  function setNotice(type, message) {
-    els.notice.hidden = false;
-    els.notice.className = "notice " + type;
-    els.notice.textContent = message;
-  }
-
-  function hideNotice() {
-    els.notice.hidden = true;
-    els.notice.textContent = "";
-  }
-
-  function showToast(message, type, duration) {
-    if (state.toastTimer) {
-      clearTimeout(state.toastTimer);
-    }
-    els.toast.hidden = false;
-    els.toast.className = "toast " + (type || "info");
-    els.toast.textContent = message;
-    state.toastTimer = setTimeout(function () {
-      els.toast.hidden = true;
-    }, duration || 4200);
-  }
-
-  function formatElapsed(milliseconds) {
-    var total = Math.max(0, Math.floor(milliseconds / 1000));
-    if (total < 60) {
-      return total + "s";
-    }
-    return Math.floor(total / 60) + "m " + pad2(total % 60) + "s";
-  }
-
-  function updateProgressElapsed() {
-    if (!state.progressStart) {
-      return;
-    }
-    els.progressElapsed.textContent = formatElapsed(Date.now() - state.progressStart);
-  }
-
-  function startProgress() {
-    if (state.progressTimer) {
-      clearInterval(state.progressTimer);
-    }
-    state.progressStart = Date.now();
-    els.progressLabel.textContent = "正在提取音频…";
-    els.progressElapsed.textContent = "0s";
-    els.extractProgress.hidden = false;
-    els.extractCard.classList.add("is-busy");
-    state.progressTimer = setInterval(updateProgressElapsed, 1000);
-  }
-
-  function stopProgress() {
-    if (state.progressTimer) {
-      clearInterval(state.progressTimer);
-      state.progressTimer = null;
-    }
-    state.progressStart = 0;
-    els.extractCard.classList.remove("is-busy");
-    els.extractProgress.hidden = true;
-  }
-
-  function setExtracting(busy) {
-    state.extracting = busy;
-    els.extractBtn.disabled = busy;
-    els.extractBtn.classList.toggle("loading", busy);
-    els.extractLabel.textContent = busy ? "正在提取…" : "提取音频";
-    if (busy) {
-      startProgress();
-    } else {
-      stopProgress();
-    }
   }
 
   function setListLoading(loading) {
@@ -259,10 +67,10 @@
 
       node.dataset.id = String(item.id);
       title.textContent = item.title || "未命名音频";
-      platform.textContent = platformName(item.platform);
+      platform.textContent = L.platformName(item.platform);
       author.textContent = item.author || "未知作者";
-      date.textContent = formatDate(item.created_at);
-      duration.textContent = formatDuration(item.duration_seconds);
+      date.textContent = L.formatDate(item.created_at);
+      duration.textContent = L.formatDuration(item.duration_seconds);
 
       main.setAttribute("aria-label", "播放 " + (item.title || "未命名音频"));
       main.addEventListener("click", function () {
@@ -311,29 +119,19 @@
 
   function updateCurrentDisplay(item) {
     els.nowPlayingTitle.textContent = item.title || "未命名音频";
-    els.nowPlayingMeta.textContent = (item.author || "未知作者") + " · " + platformName(item.platform);
-    els.sourceBadge.textContent = sourceLabel(item);
+    els.nowPlayingMeta.textContent =
+      (item.author || "未知作者") + " · " + L.platformName(item.platform);
+    els.sourceBadge.textContent = L.sourceLabel(item);
     els.sourceBadge.title = "音频保存在服务器：" + (item.file_size
-      ? formatBytes(item.file_size)
+      ? L.formatBytes(item.file_size)
       : "大小未知");
     updateMediaMetadata(item);
-  }
-
-  function formatBytes(bytes) {
-    if (typeof bytes !== "number" || bytes <= 0) {
-      return "0 B";
-    }
-    if (bytes < 1024 * 1024) {
-      return Math.round(bytes / 1024) + " KB";
-    }
-    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
   }
 
   function selectItem(item, options) {
     var opts = options || {};
     var changed = String(state.currentId) !== String(item.id);
     state.currentId = item.id;
-    els.playerCard.hidden = false;
     els.playerCard.classList.remove("is-empty");
     updateCurrentDisplay(item);
 
@@ -364,13 +162,13 @@
       if (state.items.length > 0) {
         selectItem(state.items[0], { autoplay: true });
       } else {
-        showToast("音频库还是空的，请先提取音频", "info");
+        L.showToast("音乐库还是空的，请先解析一条音频", "info");
       }
       return Promise.resolve();
     }
 
     return els.audio.play().catch(function () {
-      showToast("浏览器阻止了播放，请再点一次播放按钮", "info");
+      L.showToast("浏览器阻止了播放，请再点一次播放按钮", "info");
       updateItemStates();
     });
   }
@@ -468,11 +266,9 @@
       return Promise.resolve();
     }
     setListLoading(true);
-    // Keep the previous list visible while refreshing; only the initial call
-    // has an empty list.
     els.emptyState.hidden = true;
 
-    return api("/api/audios")
+    return L.api("/api/audios")
       .then(function (payload) {
         var items = payload && Array.isArray(payload.items) ? payload.items : [];
         state.items = items;
@@ -496,14 +292,13 @@
         }
 
         if (state.currentId === null && state.items.length > 0) {
-          // Populate the player panel without forcing autoplay.
           selectItem(state.items[0], { autoplay: false, scroll: false });
         } else if (state.currentId === null) {
           clearPlayer();
         }
       })
       .catch(function (error) {
-        showToast(error.message || "读取音频列表失败", "error", 6000);
+        L.showToast(error.message || "读取音频列表失败", "error", 6000);
         if (state.items.length === 0) {
           els.emptyState.hidden = false;
         }
@@ -514,51 +309,11 @@
       });
   }
 
-  function extractAudio() {
-    if (state.extracting) {
-      return;
-    }
-    var text = els.shareText.value.trim();
-    if (!text) {
-      setNotice("error", "请先粘贴分享文案或链接。");
-      els.shareText.focus();
-      return;
-    }
-
-    setExtracting(true);
-    hideNotice();
-
-    api("/api/extract", {
-      method: "POST",
-      body: JSON.stringify({ share_text: text }),
-    })
-      .then(function (payload) {
-        stopProgress();
-        var item = payload && payload.data;
-        if (payload && payload.duplicate) {
-          setNotice("success", "这首音频已经在音频库中，已为你定位到列表。");
-        } else {
-          setNotice("success", "提取完成，音频已保存到服务器，可以直接播放。");
-        }
-        els.shareText.value = "";
-        if (item) {
-          return loadAudios(item.id);
-        }
-        return loadAudios();
-      })
-      .catch(function (error) {
-        stopProgress();
-        setNotice("error", error.message || "提取失败，请稍后重试。");
-      })
-      .then(function () {
-        setExtracting(false);
-      });
-  }
-
   function requestDelete(item) {
     state.pendingDelete = item;
     state.lastFocus = document.activeElement;
-    els.confirmText.textContent = "将同时删除服务器上的音频文件：“" + (item.title || "未命名音频") + "”。";
+    els.confirmText.textContent =
+      "将同时删除服务器上的音频文件：“" + (item.title || "未命名音频") + "”。";
     els.confirmModal.hidden = false;
     setTimeout(function () {
       els.cancelDelete.focus();
@@ -579,7 +334,7 @@
   }
 
   function deleteItem(item) {
-    return api("/api/audios/" + encodeURIComponent(item.id), { method: "DELETE" })
+    return L.api("/api/audios/" + encodeURIComponent(item.id), { method: "DELETE" })
       .then(function () {
         var wasCurrent = String(state.currentId) === String(item.id);
         state.items = state.items.filter(function (entry) {
@@ -592,10 +347,10 @@
         if (state.currentId === null && state.items.length > 0) {
           selectItem(state.items[0], { autoplay: false, scroll: false });
         }
-        showToast("已删除音频及服务器文件", "success");
+        L.showToast("已删除音频及服务器文件", "success");
       })
       .catch(function (error) {
-        showToast(error.message || "删除失败", "error", 6000);
+        L.showToast(error.message || "删除失败", "error", 6000);
       });
   }
 
@@ -666,7 +421,6 @@
     try {
       var stored = window.localStorage.getItem("link-audio-auto-next");
       if (stored === null) {
-        // Migrate the preference from the original Douyin-only name.
         stored = window.localStorage.getItem("douyin-audio-auto-next");
       }
       if (stored !== null) {
@@ -685,13 +439,12 @@
     }
   }
 
-  els.extractBtn.addEventListener("click", extractAudio);
   els.refreshBtn.addEventListener("click", function () {
     loadAudios();
   });
   els.playAllBtn.addEventListener("click", function () {
     if (state.items.length === 0) {
-      showToast("音频库还是空的，请先提取音频", "info");
+      L.showToast("音乐库还是空的，请先解析一条音频", "info");
       return;
     }
     selectItem(state.items[0], { autoplay: true, scroll: true });
@@ -699,7 +452,7 @@
   els.playToggle.addEventListener("click", togglePlayback);
   els.nextBtn.addEventListener("click", function () {
     if (!playNext(true, true)) {
-      showToast("没有下一首了", "info");
+      L.showToast("没有下一首了", "info");
     }
   });
   els.autoNext.addEventListener("change", saveAutoNextPreference);
@@ -714,7 +467,7 @@
   });
   els.audio.addEventListener("error", function () {
     if (state.currentId !== null) {
-      showToast("音频加载失败，文件可能已被删除或格式不受支持", "error", 6000);
+      L.showToast("音频加载失败，文件可能已被删除或格式不受支持", "error", 6000);
     }
   });
   els.audio.addEventListener("loadedmetadata", function () {
@@ -730,7 +483,7 @@
       current.duration_seconds = duration;
       var node = state.nodes.get(String(current.id));
       if (node) {
-        node.querySelector(".item-duration").textContent = formatDuration(duration);
+        node.querySelector(".item-duration").textContent = L.formatDuration(duration);
       }
     }
   });
@@ -753,9 +506,6 @@
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape" && !els.confirmModal.hidden) {
       closeDeleteModal();
-    }
-    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-      extractAudio();
     }
   });
 

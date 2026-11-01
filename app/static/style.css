@@ -60,6 +60,10 @@ button {
   touch-action: manipulation;
 }
 
+a {
+  color: var(--accent);
+}
+
 button:disabled {
   cursor: not-allowed;
 }
@@ -1080,7 +1084,8 @@ h2 {
 }
 
 button:focus-visible,
-textarea:focus-visible {
+textarea:focus-visible,
+a:focus-visible {
   outline: 3px solid rgba(46, 199, 255, 0.65);
   outline-offset: 3px;
 }
@@ -1129,6 +1134,197 @@ textarea:focus-visible {
     opacity: 1;
     transform: scale(1);
   }
+}
+
+/* ---------- header navigation ---------- */
+
+.brand-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.brand-link:hover h1 {
+  color: #ffffff;
+}
+
+.header-tools {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.app-nav {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.app-nav a {
+  min-height: 38px;
+  padding: 0 17px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 750;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.app-nav a:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.app-nav a.is-active {
+  color: var(--accent-ink);
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  box-shadow: 0 6px 18px rgba(46, 199, 255, 0.15);
+}
+
+/* ---------- dedicated extraction page ---------- */
+
+.parse-page {
+  display: flex;
+  align-items: center;
+  gap: 46px;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 26px 0 12px;
+}
+
+.parse-intro {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+#parseTitle {
+  font-size: clamp(36px, 4.4vw, 54px);
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+  margin-top: 5px;
+}
+
+#parseTitle span {
+  color: transparent;
+  background: linear-gradient(100deg, var(--accent), var(--accent-strong));
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.parse-lede {
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1.6;
+  margin-top: 18px;
+  max-width: 420px;
+}
+
+.parse-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.parse-badges span {
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.extract-hero {
+  flex: 0 0 540px;
+  max-width: 540px;
+  padding: 28px;
+}
+
+.extract-hero .share-input {
+  min-height: 200px;
+}
+
+.success-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 13px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(78, 224, 200, 0.22);
+  background: rgba(78, 224, 200, 0.07);
+}
+
+.success-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.success-copy strong {
+  color: #d7fff7;
+  font-size: 14px;
+}
+
+.success-copy span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.primary-btn.success-btn {
+  width: auto;
+  flex: 0 0 auto;
+  min-height: 48px;
+  padding: 0 18px;
+  font-size: 14px;
+  text-decoration: none;
+}
+
+/* ---------- dedicated music page ---------- */
+
+.music-workspace .player-card {
+  padding: 20px;
+}
+
+.music-workspace .player-hero {
+  display: block;
+}
+
+.music-workspace .cover-art {
+  width: min(100%, 300px);
+  height: auto;
+  aspect-ratio: 1;
+  flex: 0 0 auto;
+  margin: 0 auto;
+}
+
+.music-workspace .player-detail {
+  margin-top: 16px;
+}
+
+.music-workspace .player-actions {
+  margin-top: 14px;
+}
+
+.music-workspace .now-playing-title {
+  font-size: clamp(22px, 2.4vw, 30px);
+}
+
+.music-workspace .cover-note {
+  font-size: 68px;
+}
+
+.music-workspace #audio {
+  margin-top: 14px;
 }
 
 /* ---------- responsive ---------- */
@@ -1582,5 +1778,164 @@ textarea:focus-visible {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+
+@media (max-width: 1080px) {
+  .parse-page {
+    gap: 28px;
+  }
+
+  .extract-hero {
+    flex-basis: 500px;
+    max-width: 500px;
+  }
+}
+
+@media (max-width: 860px) {
+  .parse-page {
+    display: block;
+    max-width: 760px;
+    padding-top: 18px;
+  }
+
+  .parse-lede {
+    max-width: 620px;
+  }
+
+  .extract-hero {
+    width: 100%;
+    max-width: none;
+    margin-top: 26px;
+  }
+}
+
+@media (max-width: 720px) {
+  .app-header {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .header-tools {
+    gap: 8px;
+    margin-left: auto;
+  }
+
+  .app-nav a {
+    min-height: 36px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  #parseTitle {
+    font-size: 35px;
+  }
+
+  .parse-lede {
+    font-size: 14px;
+    margin-top: 13px;
+  }
+
+  .parse-badges {
+    margin-top: 15px;
+  }
+
+  .extract-hero {
+    margin-top: 22px;
+  }
+
+  .extract-hero .share-input {
+    min-height: 150px;
+  }
+
+  .success-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .primary-btn.success-btn {
+    width: 100%;
+  }
+
+  .music-workspace .cover-art {
+    width: 200px;
+    height: 200px;
+    aspect-ratio: auto;
+  }
+
+  .music-workspace .cover-note {
+    font-size: 48px;
+  }
+}
+
+@media (max-width: 440px) {
+  .app-nav a {
+    padding: 0 10px;
+  }
+
+  #parseTitle {
+    font-size: 30px;
+  }
+
+  .music-workspace .cover-art {
+    width: 168px;
+    height: 168px;
+  }
+
+  .music-workspace .cover-note {
+    font-size: 42px;
+  }
+}
+
+/* Short landscape screens (car head units) */
+@media (min-width: 900px) and (max-height: 720px) {
+  .parse-page {
+    padding-top: 10px;
+    gap: 24px;
+  }
+
+  #parseTitle {
+    font-size: 34px;
+  }
+
+  .parse-lede,
+  .parse-badges {
+    display: none;
+  }
+
+  .extract-hero {
+    flex-basis: 470px;
+    max-width: 470px;
+    padding: 16px 18px;
+  }
+
+  .extract-hero .share-input {
+    height: 92px;
+    min-height: 92px;
+  }
+
+  .music-workspace .player-hero {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .music-workspace .cover-art {
+    width: 104px;
+    height: 104px;
+    flex: 0 0 104px;
+    margin: 0;
+    aspect-ratio: auto;
+  }
+
+  .music-workspace .cover-note {
+    font-size: 38px;
+  }
+
+  .music-workspace .player-detail {
+    flex: 1 1 0;
+    min-width: 0;
+    margin-top: 0;
   }
 }

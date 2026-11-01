@@ -1,6 +1,6 @@
 # 链接音频库（Link Audio）
 
-把分享文案/短链接中的音频转成 MP3，保存在自己的服务器磁盘和 SQLite 中，并提供一个适合手机、车机浏览器触摸操作的单页播放库。
+把分享文案/短链接中的音频转成 MP3，保存在自己的服务器磁盘和 SQLite 中，并提供一个适合手机、车机浏览器触摸操作的解析页和独立音乐库。
 
 项目采用 **provider（来源平台）架构**：抖音是当前实现的第一个 provider，后续可以增加小红书、B 站、YouTube 等来源，而不用改动存储、Range 播放、前端播放器和删除逻辑。
 
@@ -25,11 +25,12 @@
   - `Accept-Ranges: bytes`
   - `HEAD` 与 `GET` 行为一致（含 Range 时 HEAD 也返回 206 头）
   - 64 KB 分块流式读取，不把整首歌读进内存。
-- 原生 HTML/CSS/JS 前端，无前端框架：
-  - 桌面左右布局：左侧提取，右侧播放器 + 播放列表；窄屏自动堆叠；
-  - 右侧播放器包含封面、当前曲目、播放/暂停、下一首、播放全部和播放列表；
+- 原生 HTML/CSS/JS 前端，无前端框架，分成两个页面：
+  - `/` 解析页：粘贴文案、提取、显示进度条和成功入口；
+  - `/library` 音乐库：播放器 + 播放列表，不再混入提取表单；
+  - 音乐库播放器包含封面、当前曲目、播放/暂停、下一首、播放全部和自动下一首；
   - 提取期间显示不确定进度条和实时耗时（后端是单次请求，不是伪造百分比）；
-  - 大按钮、大字体、适合触控；
+  - 大按钮、大字体、适合触控；窄屏自动堆叠；
   - 原生 `<audio controls>`，车机拖动进度条依赖服务端 Range；
   - 列表点击切换、播放/暂停、删除、自动下一首、Media Session 车机媒体键支持。
 - SQLite + 磁盘持久化，支持 Docker Compose；同一条音频按 `(platform, media_id)` 去重。
@@ -61,9 +62,12 @@ link-audio/
 │   ├── storage.py           # MUSIC_DIR 路径安全解析
 │   ├── logging_conf.py      # 日志初始化
 │   └── static/
-│       ├── index.html
+│       ├── index.html         # 解析页 /
+│       ├── library.html       # 音乐库 /library
 │       ├── style.css
-│       └── app.js
+│       ├── common.js          # API/格式化/Toast 共用
+│       ├── extract.js         # 解析页逻辑
+│       └── library.js         # 播放器与播放列表逻辑
 ├── tests/
 │   ├── test_api.py          # Range / HEAD / 删除 / 校验测试
 │   ├── test_db.py           # platform 字段、旧库迁移、去重测试
@@ -300,7 +304,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 
 打开：
 
-- 页面：<http://localhost:8001/>
+- 解析页：<http://localhost:8001/>
+- 音乐库：<http://localhost:8001/library>
 - API 文档：<http://localhost:8001/docs>
 - 健康检查：<http://localhost:8001/health>
 
@@ -647,7 +652,7 @@ ruff check app tests
 ruff format --check app tests
 ```
 
-当前测试套件共 37 项，覆盖：
+当前测试套件共 38 项，覆盖：
 
 - 分享文案中的链接提取、非抖音域名拒绝、裸域名补全；
 - provider 注册/分发、旧库 `platform` 字段迁移、同 ID 跨平台隔离；
@@ -660,7 +665,7 @@ ruff format --check app tests
 - 音乐下载失败、图文音乐失败时回退视频；
 - `200/206/416`、HEAD、Content-Range、删除文件和数据库记录、参数校验。
 
-测试使用临时目录、假 provider/假下载器/假 FFmpeg，不访问真实平台。
+测试使用临时目录、假 provider/假下载器/假 FFmpeg，不访问真实平台；同时覆盖解析页和音乐库页面的路由。
 
 ---
 

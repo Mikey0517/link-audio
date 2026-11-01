@@ -44,6 +44,19 @@ def _seed(
     return record_id, path
 
 
+def test_pages_are_split(app_client) -> None:
+    _app, client, _settings = app_client
+    extract_page = client.get("/")
+    assert extract_page.status_code == 200
+    assert "解析音频" in extract_page.text
+    assert "/static/extract.js" in extract_page.text
+
+    library_page = client.get("/library")
+    assert library_page.status_code == 200
+    assert "音乐库" in library_page.text
+    assert "/static/library.js" in library_page.text
+
+
 def test_health_and_empty_list(app_client) -> None:
     _app, client, _settings = app_client
     response = client.get("/health")

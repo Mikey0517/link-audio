@@ -321,9 +321,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     @app.get("/", include_in_schema=False)
-    async def index():
+    async def extract_page():
         return FileResponse(
             STATIC_DIR / "index.html",
+            media_type="text/html; charset=utf-8",
+            headers={"Cache-Control": "no-cache"},
+        )
+
+    @app.get("/library", include_in_schema=False)
+    async def library_page():
+        return FileResponse(
+            STATIC_DIR / "library.html",
             media_type="text/html; charset=utf-8",
             headers={"Cache-Control": "no-cache"},
         )
