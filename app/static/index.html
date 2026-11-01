@@ -24,88 +24,120 @@
   </header>
 
   <main class="app-main">
-    <section class="card extract-card" aria-labelledby="extractTitle">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">提取新音频</p>
-          <h2 id="extractTitle">粘贴分享文案</h2>
-        </div>
-        <span class="keyboard-hint">支持图文 / 视频</span>
-      </div>
+    <div class="workspace">
+      <aside class="workspace-left" aria-label="提取音频">
+        <section id="extractCard" class="card extract-card" aria-labelledby="extractTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">提取新音频</p>
+              <h2 id="extractTitle">粘贴分享文案</h2>
+            </div>
+            <span class="keyboard-hint">图文 / 视频</span>
+          </div>
 
-      <label class="sr-only" for="shareText">分享文案或链接</label>
-      <textarea
-        id="shareText"
-        class="share-input"
-        rows="3"
-        maxlength="8000"
-        autocomplete="off"
-        spellcheck="false"
-        placeholder="例如：8.25 复制打开抖音，看看【xxx的作品】…… https://v.douyin.com/xxxxxx/ ……"></textarea>
+          <label class="sr-only" for="shareText">分享文案或链接</label>
+          <textarea
+            id="shareText"
+            class="share-input"
+            rows="4"
+            maxlength="8000"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="例如：8.25 复制打开抖音，看看【xxx的作品】…… https://v.douyin.com/xxxxxx/ ……"></textarea>
 
-      <div class="extract-actions">
-        <button id="extractBtn" class="primary-btn" type="button">
-          <span class="btn-spinner" aria-hidden="true"></span>
-          <span class="btn-label">提取音频</span>
-        </button>
-        <p class="hint">目前支持抖音。服务端会解析链接并保存为 MP3；图文优先下载原声，视频失败时用 FFmpeg 抽取完整音轨。</p>
-      </div>
+          <div class="extract-actions">
+            <button id="extractBtn" class="primary-btn" type="button">
+              <span class="btn-spinner" aria-hidden="true"></span>
+              <span class="btn-label">提取音频</span>
+            </button>
+            <p class="hint">支持抖音图文 / 视频，保存后可直接播放。</p>
+          </div>
 
-      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
-    </section>
+          <div
+            id="extractProgress"
+            class="extract-progress"
+            role="progressbar"
+            aria-label="提取进度"
+            aria-valuetext="正在提取音频"
+            aria-busy="true"
+            hidden>
+            <div class="progress-top">
+              <span id="progressLabel">正在提取音频…</span>
+              <span id="progressElapsed" class="progress-elapsed">0s</span>
+            </div>
+            <div class="progress-track"><span class="progress-fill"></span></div>
+          </div>
 
-    <section id="playerCard" class="card player-card" aria-labelledby="nowPlayingTitle" hidden>
-      <div class="player-top">
-        <button id="playToggle" class="play-toggle" type="button" aria-label="播放">
-          <span id="playIcon" class="play-icon" aria-hidden="true">▶</span>
-        </button>
-        <div class="player-info">
-          <p class="eyebrow">当前音频</p>
-          <h2 id="nowPlayingTitle" class="now-playing-title">选择一首音频</h2>
-          <p id="nowPlayingMeta" class="now-playing-meta"></p>
-        </div>
-        <button id="nextBtn" class="next-btn" type="button" aria-label="播放下一首" title="下一首">
-          <span aria-hidden="true">⏭</span>
-        </button>
-      </div>
+          <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+        </section>
+      </aside>
 
-      <audio id="audio" controls preload="metadata" playsinline>
-        你的浏览器不支持 HTML5 音频播放。
-      </audio>
+      <section class="workspace-right" aria-label="播放器与音频列表">
+        <section id="playerCard" class="card player-card is-empty" aria-labelledby="nowPlayingTitle">
+          <div class="player-hero">
+            <div class="cover-art" aria-hidden="true">
+              <span class="cover-note">♪</span>
+              <span class="cover-bars"><i></i><i></i><i></i><i></i></span>
+            </div>
+            <div class="player-detail">
+              <div class="player-kicker">
+                <p class="eyebrow">当前播放</p>
+                <span id="sourceBadge" class="source-badge">本地音频</span>
+              </div>
+              <h2 id="nowPlayingTitle" class="now-playing-title">选择一首音频</h2>
+              <p id="nowPlayingMeta" class="now-playing-meta">播放列表中的音频会显示在这里</p>
 
-      <div class="player-footer">
-        <span id="sourceBadge" class="source-badge">本地音频</span>
-        <label class="auto-next">
-          <input id="autoNext" type="checkbox" checked>
-          <span class="switch" aria-hidden="true"></span>
-          <span>播完自动下一首</span>
-        </label>
-      </div>
-    </section>
+              <div class="player-actions">
+                <button id="playToggle" class="play-toggle" type="button" aria-label="播放">
+                  <span id="playIcon" class="play-icon" aria-hidden="true">▶</span>
+                </button>
+                <button id="nextBtn" class="next-btn" type="button" aria-label="播放下一首" title="下一首">
+                  <span aria-hidden="true">⏭</span>
+                </button>
+                <label class="auto-next">
+                  <input id="autoNext" type="checkbox" checked>
+                  <span class="switch" aria-hidden="true"></span>
+                  <span>播完自动下一首</span>
+                </label>
+              </div>
+            </div>
+          </div>
 
-    <section class="library" aria-labelledby="libraryTitle">
-      <div class="library-head">
-        <div>
-          <p class="eyebrow">已保存到服务器</p>
-          <h2 id="libraryTitle">音频库 <span id="audioCount" class="count-pill">0</span></h2>
-        </div>
-        <button id="refreshBtn" class="ghost-btn" type="button">
-          <span aria-hidden="true">↻</span> 刷新
-        </button>
-      </div>
+          <audio id="audio" controls preload="metadata" playsinline>
+            你的浏览器不支持 HTML5 音频播放。
+          </audio>
+        </section>
 
-      <div id="loadingList" class="list-loading" hidden>
-        <span class="btn-spinner" aria-hidden="true"></span> 正在读取音频列表…
-      </div>
+        <section class="card library-card" aria-labelledby="libraryTitle">
+          <div class="library-head">
+            <div>
+              <p class="eyebrow">播放列表</p>
+              <h2 id="libraryTitle">音频库 <span id="audioCount" class="count-pill">0</span></h2>
+            </div>
+            <div class="library-actions">
+              <button id="playAllBtn" class="play-all-btn" type="button">
+                <span aria-hidden="true">▶</span> 播放全部
+              </button>
+              <button id="refreshBtn" class="ghost-btn" type="button">
+                <span aria-hidden="true">↻</span> 刷新
+              </button>
+            </div>
+          </div>
 
-      <ul id="audioList" class="audio-list" aria-label="音频列表"></ul>
+          <div id="loadingList" class="list-loading" hidden>
+            <span class="btn-spinner" aria-hidden="true"></span> 正在读取音频列表…
+          </div>
 
-      <div id="emptyState" class="empty-state" hidden>
-        <div class="empty-icon" aria-hidden="true">♫</div>
-        <h3>还没有音频</h3>
-        <p>粘贴一段分享文案，点击“提取音频”开始。</p>
-      </div>
-    </section>
+          <ul id="audioList" class="audio-list" aria-label="音频列表"></ul>
+
+          <div id="emptyState" class="empty-state" hidden>
+            <div class="empty-icon" aria-hidden="true">♫</div>
+            <h3>还没有音频</h3>
+            <p>在左侧粘贴分享文案，点击“提取音频”开始。</p>
+          </div>
+        </section>
+      </section>
+    </div>
   </main>
 
   <footer class="app-footer">

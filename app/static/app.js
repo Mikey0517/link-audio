@@ -3,8 +3,12 @@
 
   var els = {
     shareText: document.getElementById("shareText"),
+    extractCard: document.getElementById("extractCard"),
     extractBtn: document.getElementById("extractBtn"),
     extractLabel: document.querySelector("#extractBtn .btn-label"),
+    extractProgress: document.getElementById("extractProgress"),
+    progressLabel: document.getElementById("progressLabel"),
+    progressElapsed: document.getElementById("progressElapsed"),
     notice: document.getElementById("notice"),
     playerCard: document.getElementById("playerCard"),
     playToggle: document.getElementById("playToggle"),
@@ -20,6 +24,7 @@
     emptyState: document.getElementById("emptyState"),
     loadingList: document.getElementById("loadingList"),
     refreshBtn: document.getElementById("refreshBtn"),
+    playAllBtn: document.getElementById("playAllBtn"),
     toast: document.getElementById("toast"),
     confirmModal: document.getElementById("confirmModal"),
     confirmText: document.getElementById("confirmText"),
@@ -37,6 +42,8 @@
     pendingDelete: null,
     lastFocus: null,
     toastTimer: null,
+    progressTimer: null,
+    progressStart: 0,
   };
 
   var platformLabels = {
@@ -180,11 +187,53 @@
     }, duration || 4200);
   }
 
+  function formatElapsed(milliseconds) {
+    var total = Math.max(0, Math.floor(milliseconds / 1000));
+    if (total < 60) {
+      return total + "s";
+    }
+    return Math.floor(total / 60) + "m " + pad2(total % 60) + "s";
+  }
+
+  function updateProgressElapsed() {
+    if (!state.progressStart) {
+      return;
+    }
+    els.progressElapsed.textContent = formatElapsed(Date.now() - state.progressStart);
+  }
+
+  function startProgress() {
+    if (state.progressTimer) {
+      clearInterval(state.progressTimer);
+    }
+    state.progressStart = Date.now();
+    els.progressLabel.textContent = "正在提取音频…";
+    els.progressElapsed.textContent = "0s";
+    els.extractProgress.hidden = false;
+    els.extractCard.classList.add("is-busy");
+    state.progressTimer = setInterval(updateProgressElapsed, 1000);
+  }
+
+  function stopProgress() {
+    if (state.progressTimer) {
+      clearInterval(state.progressTimer);
+      state.progressTimer = null;
+    }
+    state.progressStart = 0;
+    els.extractCard.classList.remove("is-busy");
+    els.extractProgress.hidden = true;
+  }
+
   function setExtracting(busy) {
     state.extracting = busy;
     els.extractBtn.disabled = busy;
     els.extractBtn.classList.toggle("loading", busy);
     els.extractLabel.textContent = busy ? "正在提取…" : "提取音频";
+    if (busy) {
+      startProgress();
+    } else {
+      stopProgress();
+    }
   }
 
   function setListLoading(loading) {
@@ -231,6 +280,7 @@
 
     els.audioCount.textContent = String(state.items.length);
     els.emptyState.hidden = state.loadingList || state.items.length > 0;
+    els.playAllBtn.disabled = state.items.length === 0;
     els.nextBtn.disabled = state.items.length < 2;
     updateItemStates();
   }
@@ -254,12 +304,14 @@
     els.playToggle.classList.toggle("is-playing", playing);
     els.playIcon.textContent = playing ? "❚❚" : "▶";
     els.playToggle.setAttribute("aria-label", playing ? "暂停" : "播放");
+    els.playToggle.disabled = state.items.length === 0;
+    els.playerCard.classList.toggle("is-playing", playing);
     updateMediaSessionState(playing);
   }
 
   function updateCurrentDisplay(item) {
     els.nowPlayingTitle.textContent = item.title || "未命名音频";
-    els.nowPlayingMeta.textContent = (item.author || "未知作者") + " · " + sourceLabel(item);
+    els.nowPlayingMeta.textContent = (item.author || "未知作者") + " · " + platformName(item.platform);
     els.sourceBadge.textContent = sourceLabel(item);
     els.sourceBadge.title = "音频保存在服务器：" + (item.file_size
       ? formatBytes(item.file_size)
@@ -282,6 +334,7 @@
     var changed = String(state.currentId) !== String(item.id);
     state.currentId = item.id;
     els.playerCard.hidden = false;
+    els.playerCard.classList.remove("is-empty");
     updateCurrentDisplay(item);
 
     if (changed || els.audio.dataset.audioId !== String(item.id)) {
@@ -400,10 +453,12 @@
     els.audio.removeAttribute("src");
     delete els.audio.dataset.audioId;
     els.audio.load();
-    els.playerCard.hidden = true;
+    els.playerCard.classList.add("is-empty");
+    els.playerCard.classList.remove("is-playing");
     els.nowPlayingTitle.textContent = "选择一首音频";
-    els.nowPlayingMeta.textContent = "";
+    els.nowPlayingMeta.textContent = "播放列表中的音频会显示在这里";
     els.sourceBadge.textContent = "本地音频";
+    els.sourceBadge.title = "";
     updateItemStates();
     clearMediaMetadata();
   }
@@ -439,6 +494,13 @@
             clearPlayer();
           }
         }
+
+        if (state.currentId === null && state.items.length > 0) {
+          // Populate the player panel without forcing autoplay.
+          selectItem(state.items[0], { autoplay: false, scroll: false });
+        } else if (state.currentId === null) {
+          clearPlayer();
+        }
       })
       .catch(function (error) {
         showToast(error.message || "读取音频列表失败", "error", 6000);
@@ -465,16 +527,13 @@
 
     setExtracting(true);
     hideNotice();
-    setNotice(
-      "info",
-      "正在解析分享链接并获取音频，请稍候。视频作品可能需要 FFmpeg 转码，耗时会更长。"
-    );
 
     api("/api/extract", {
       method: "POST",
       body: JSON.stringify({ share_text: text }),
     })
       .then(function (payload) {
+        stopProgress();
         var item = payload && payload.data;
         if (payload && payload.duplicate) {
           setNotice("success", "这首音频已经在音频库中，已为你定位到列表。");
@@ -488,6 +547,7 @@
         return loadAudios();
       })
       .catch(function (error) {
+        stopProgress();
         setNotice("error", error.message || "提取失败，请稍后重试。");
       })
       .then(function () {
@@ -529,6 +589,9 @@
           clearPlayer();
         }
         renderList();
+        if (state.currentId === null && state.items.length > 0) {
+          selectItem(state.items[0], { autoplay: false, scroll: false });
+        }
         showToast("已删除音频及服务器文件", "success");
       })
       .catch(function (error) {
@@ -625,6 +688,13 @@
   els.extractBtn.addEventListener("click", extractAudio);
   els.refreshBtn.addEventListener("click", function () {
     loadAudios();
+  });
+  els.playAllBtn.addEventListener("click", function () {
+    if (state.items.length === 0) {
+      showToast("音频库还是空的，请先提取音频", "info");
+      return;
+    }
+    selectItem(state.items[0], { autoplay: true, scroll: true });
   });
   els.playToggle.addEventListener("click", togglePlayback);
   els.nextBtn.addEventListener("click", function () {
