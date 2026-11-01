@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1220">
+  <meta name="color-scheme" content="dark">
+  <title>链接音频库</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <div class="ambient ambient-two" aria-hidden="true"></div>
+
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">♪</div>
+      <div>
+        <h1>链接音频库</h1>
+        <p>支持抖音，更多平台可通过 provider 扩展</p>
+      </div>
+    </div>
+    <span class="self-use-badge">个人自用</span>
+  </header>
+
+  <main class="app-main">
+    <section class="card extract-card" aria-labelledby="extractTitle">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">提取新音频</p>
+          <h2 id="extractTitle">粘贴分享文案</h2>
+        </div>
+        <span class="keyboard-hint">支持图文 / 视频</span>
+      </div>
+
+      <label class="sr-only" for="shareText">分享文案或链接</label>
+      <textarea
+        id="shareText"
+        class="share-input"
+        rows="3"
+        maxlength="8000"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="例如：8.25 复制打开抖音，看看【xxx的作品】…… https://v.douyin.com/xxxxxx/ ……"></textarea>
+
+      <div class="extract-actions">
+        <button id="extractBtn" class="primary-btn" type="button">
+          <span class="btn-spinner" aria-hidden="true"></span>
+          <span class="btn-label">提取音频</span>
+        </button>
+        <p class="hint">目前支持抖音。服务端会解析链接并保存为 MP3；图文优先下载原声，视频失败时用 FFmpeg 抽取完整音轨。</p>
+      </div>
+
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    </section>
+
+    <section id="playerCard" class="card player-card" aria-labelledby="nowPlayingTitle" hidden>
+      <div class="player-top">
+        <button id="playToggle" class="play-toggle" type="button" aria-label="播放">
+          <span id="playIcon" class="play-icon" aria-hidden="true">▶</span>
+        </button>
+        <div class="player-info">
+          <p class="eyebrow">当前音频</p>
+          <h2 id="nowPlayingTitle" class="now-playing-title">选择一首音频</h2>
+          <p id="nowPlayingMeta" class="now-playing-meta"></p>
+        </div>
+        <button id="nextBtn" class="next-btn" type="button" aria-label="播放下一首" title="下一首">
+          <span aria-hidden="true">⏭</span>
+        </button>
+      </div>
+
+      <audio id="audio" controls preload="metadata" playsinline>
+        你的浏览器不支持 HTML5 音频播放。
+      </audio>
+
+      <div class="player-footer">
+        <span id="sourceBadge" class="source-badge">本地音频</span>
+        <label class="auto-next">
+          <input id="autoNext" type="checkbox" checked>
+          <span class="switch" aria-hidden="true"></span>
+          <span>播完自动下一首</span>
+        </label>
+      </div>
+    </section>
+
+    <section class="library" aria-labelledby="libraryTitle">
+      <div class="library-head">
+        <div>
+          <p class="eyebrow">已保存到服务器</p>
+          <h2 id="libraryTitle">音频库 <span id="audioCount" class="count-pill">0</span></h2>
+        </div>
+        <button id="refreshBtn" class="ghost-btn" type="button">
+          <span aria-hidden="true">↻</span> 刷新
+        </button>
+      </div>
+
+      <div id="loadingList" class="list-loading" hidden>
+        <span class="btn-spinner" aria-hidden="true"></span> 正在读取音频列表…
+      </div>
+
+      <ul id="audioList" class="audio-list" aria-label="音频列表"></ul>
+
+      <div id="emptyState" class="empty-state" hidden>
+        <div class="empty-icon" aria-hidden="true">♫</div>
+        <h3>还没有音频</h3>
+        <p>粘贴一段分享文案，点击“提取音频”开始。</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span>仅供个人学习与自用 · 音频保存在本机服务器</span>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <div id="confirmModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" hidden>
+    <div class="modal-card">
+      <p class="eyebrow">删除音频</p>
+      <h2 id="confirmTitle">确定删除？</h2>
+      <p id="confirmText" class="modal-text"></p>
+      <div class="modal-actions">
+        <button id="cancelDelete" class="ghost-btn large" type="button">取消</button>
+        <button id="confirmDelete" class="danger-btn large" type="button">删除</button>
+      </div>
+    </div>
+  </div>
+
+  <template id="audioItemTemplate">
+    <li class="audio-item">
+      <button class="item-main" type="button">
+        <span class="item-play" aria-hidden="true">▶</span>
+        <span class="item-copy">
+          <span class="item-title"></span>
+          <span class="item-meta">
+            <span class="item-platform"></span>
+            <span class="dot" aria-hidden="true">·</span>
+            <span class="item-author"></span>
+            <span class="dot" aria-hidden="true">·</span>
+            <span class="item-date"></span>
+            <span class="dot" aria-hidden="true">·</span>
+            <span class="item-duration"></span>
+          </span>
+        </span>
+        <span class="equalizer" aria-hidden="true"><i></i><i></i><i></i></span>
+      </button>
+      <button class="delete-btn" type="button">删除</button>
+    </li>
+  </template>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

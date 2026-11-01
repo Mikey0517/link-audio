@@ -1,0 +1,51 @@
+services:
+  link-audio:
+    build: .
+    image: link-audio:latest
+    container_name: link-audio
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      MUSIC_DIR: /app/music
+      DB_PATH: /app/data/music.db
+      MAX_DOWNLOAD_MB: ${MAX_DOWNLOAD_MB:-500}
+      MAX_CONCURRENT_EXTRACTIONS: ${MAX_CONCURRENT_EXTRACTIONS:-2}
+      QUEUE_TIMEOUT_SECONDS: ${QUEUE_TIMEOUT_SECONDS:-45}
+      PAGE_TIMEOUT_SECONDS: ${PAGE_TIMEOUT_SECONDS:-20}
+      DOWNLOAD_TIMEOUT_SECONDS: ${DOWNLOAD_TIMEOUT_SECONDS:-300}
+      FFMPEG_TIMEOUT_SECONDS: ${FFMPEG_TIMEOUT_SECONDS:-600}
+      MAX_PAGE_BYTES: ${MAX_PAGE_BYTES:-8388608}
+      SSRF_DNS_CHECK: ${SSRF_DNS_CHECK:-true}
+      DOUYIN_REFERER: ${DOUYIN_REFERER:-https://www.douyin.com/}
+      USER_AGENT: "${USER_AGENT:-Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1}"
+      FFMPEG_BIN: ${FFMPEG_BIN:-ffmpeg}
+      FFPROBE_BIN: ${FFPROBE_BIN:-ffprobe}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      # Keep audio and SQLite data on the host so they survive container rebuilds.
+      - ./music:/app/music
+      - ./data:/app/data
+    # Match the host user so bind-mounted music/data remain editable by you.
+    # On most single-user Linux systems 1000:1000 is correct.
+    user: "${PUID:-1000}:${PGID:-1000}"
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
