@@ -289,20 +289,20 @@ cp .env.example .env
 
 ```bash
 source .venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 8001
 ```
 
 开发时自动重载：
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
 打开：
 
-- 页面：<http://localhost:8000/>
-- API 文档：<http://localhost:8000/docs>
-- 健康检查：<http://localhost:8000/health>
+- 页面：<http://localhost:8001/>
+- API 文档：<http://localhost:8001/docs>
+- 健康检查：<http://localhost:8001/health>
 
 ### 5. 车机/手机访问
 
@@ -315,13 +315,13 @@ hostname -I          # Linux / WSL，找到局域网 IP
 在车机浏览器打开：
 
 ```text
-http://<服务器局域网IP>:8000/
+http://<服务器局域网IP>:8001/
 ```
 
 如果无法访问，依次检查：
 
 1. 服务是否绑定 `0.0.0.0`，而不是 `127.0.0.1`；
-2. 防火墙是否放行 8000（例如 `sudo ufw allow 8000/tcp`，只建议在可信局域网）；
+2. 防火墙是否放行 8001（例如 `sudo ufw allow 8001/tcp`，只建议在可信局域网）；
 3. 手机/车机是否连接同一个 Wi-Fi；
 4. WSL2 默认 NAT 网络可能无法被局域网直接访问，推荐用 Docker Desktop 的端口映射，或在 Windows 上配置端口转发/镜像网络。
 
@@ -345,13 +345,13 @@ docker compose up -d --build
 docker compose logs -f --tail=100
 ```
 
-打开 <http://localhost:8000/>。
+打开 <http://localhost:8001/>。
 
 查看状态：
 
 ```bash
 docker compose ps
-curl -s http://localhost:8000/health
+curl -s http://localhost:8001/health
 ```
 
 停止 / 重启 / 更新：
@@ -419,7 +419,7 @@ docker compose restart
 | `FFMPEG_BIN` | `ffmpeg` | FFmpeg 命令或绝对路径 |
 | `FFPROBE_BIN` | `ffprobe` | ffprobe 命令或绝对路径 |
 | `LOG_LEVEL` | `INFO` | `DEBUG/INFO/WARNING/ERROR/CRITICAL` |
-| `APP_PORT` | `8000` | Docker Compose 宿主机端口 |
+| `APP_PORT` | `8001` | Docker Compose 宿主机端口 |
 | `PUID` / `PGID` | `1000` | Docker Compose 运行用户 |
 | `TZ` | `Asia/Shanghai` | 容器时区 |
 
@@ -533,15 +533,15 @@ FFmpeg 缺失时 `status` 为 `degraded`，HTTP 仍返回 200（图文直链仍�
 
 ```bash
 # 提取
-curl -sS -X POST http://localhost:8000/api/extract \
+curl -sS -X POST http://localhost:8001/api/extract \
   -H 'Content-Type: application/json' \
   -d '{"share_text":"复制打开抖音 https://v.douyin.com/xxxxxx/"}'
 
 # 列表
-curl -sS http://localhost:8000/api/audios
+curl -sS http://localhost:8001/api/audios
 
 # 删除
-curl -sS -X DELETE http://localhost:8000/api/audios/1
+curl -sS -X DELETE http://localhost:8001/api/audios/1
 ```
 
 ---
@@ -553,7 +553,7 @@ curl -sS -X DELETE http://localhost:8000/api/audios/1
 ### 1. 完整请求应为 200
 
 ```bash
-curl -sS -D - -o /dev/null http://localhost:8000/audio/1
+curl -sS -D - -o /dev/null http://localhost:8001/audio/1
 ```
 
 重点看：
@@ -570,7 +570,7 @@ content-length: <完整大小>
 ```bash
 curl -sS -D - -o /dev/null \
   -H "Range: bytes=0-1023" \
-  http://localhost:8000/audio/1
+  http://localhost:8001/audio/1
 ```
 
 期望：
@@ -588,7 +588,7 @@ content-length: 1024
 ```bash
 curl -sS -I \
   -H "Range: bytes=0-1023" \
-  http://localhost:8000/audio/1
+  http://localhost:8001/audio/1
 ```
 
 期望同样是 `206`、`Content-Range`、`Accept-Ranges`、`Content-Length: 1024`，但没有响应体。
@@ -598,7 +598,7 @@ curl -sS -I \
 ```bash
 curl -sS -D - -o /dev/null \
   -H "Range: bytes=-1024" \
-  http://localhost:8000/audio/1
+  http://localhost:8001/audio/1
 ```
 
 ### 5. 越界应 416
@@ -606,7 +606,7 @@ curl -sS -D - -o /dev/null \
 ```bash
 curl -sS -D - -o /dev/null \
   -H "Range: bytes=999999999-" \
-  http://localhost:8000/audio/1
+  http://localhost:8001/audio/1
 ```
 
 期望：
@@ -619,9 +619,9 @@ content-range: bytes */<总大小>
 ### 6. 用状态码快速判断
 
 ```bash
-curl -s -o /dev/null -w 'no-range=%{http_code}\n' http://localhost:8000/audio/1
+curl -s -o /dev/null -w 'no-range=%{http_code}\n' http://localhost:8001/audio/1
 curl -s -o /dev/null -w 'range=%{http_code}\n' \
-  -H 'Range: bytes=0-1023' http://localhost:8000/audio/1
+  -H 'Range: bytes=0-1023' http://localhost:8001/audio/1
 ```
 
 应输出：
@@ -727,7 +727,7 @@ Docker 镜像已经内置，若仍提示，检查是否用了旧的镜像，重�
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' \
-  -H 'Range: bytes=0-1023' http://localhost:8000/audio/1
+  -H 'Range: bytes=0-1023' http://localhost:8001/audio/1
 ```
 
 如果返回 206 但车机仍不能拖动，检查中间是否有反向代理/CDN 吃掉了 Range 或做了缓冲。Nginx 至少需要：

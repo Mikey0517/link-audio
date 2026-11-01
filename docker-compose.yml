@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     ports:
-      - "${APP_PORT:-8000}:8000"
+      - "${APP_PORT:-8001}:8001"
     environment:
       MUSIC_DIR: /app/music
       DB_PATH: /app/data/music.db
@@ -44,7 +44,7 @@ services:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3)"
       interval: 30s
       timeout: 5s
       start_period: 20s
