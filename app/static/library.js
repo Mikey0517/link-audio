@@ -33,6 +33,7 @@
     loadingList: false,
     pendingDelete: null,
     lastFocus: null,
+    deleting: {},
   };
 
   function findItem(id) {
@@ -81,6 +82,13 @@
       deleteBtn.addEventListener("click", function () {
         requestDelete(item);
       });
+
+      if (state.deleting[String(item.id)]) {
+        node.classList.add("is-deleting");
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = "删除中";
+        deleteBtn.setAttribute("aria-busy", "true");
+      }
 
       state.nodes.set(String(item.id), node);
       els.audioList.appendChild(fragment);
@@ -189,6 +197,9 @@
   }
 
   function onItemClick(item) {
+    if (state.deleting[String(item.id)]) {
+      return;
+    }
     if (String(state.currentId) === String(item.id)) {
       togglePlayback();
       return;
@@ -309,7 +320,35 @@
       });
   }
 
+  function setDeleteLoading(item, loading) {
+    var node = state.nodes.get(String(item.id));
+    if (!node) {
+      return;
+    }
+    node.classList.toggle("is-deleting", loading);
+    var button = node.querySelector(".delete-btn");
+    if (button) {
+      button.disabled = loading;
+      button.textContent = loading ? "删除中" : "删除";
+      button.setAttribute("aria-busy", loading ? "true" : "false");
+    }
+    if (loading) {
+      var main = node.querySelector(".item-main");
+      if (main) {
+        main.disabled = true;
+      }
+    } else {
+      var itemMain = node.querySelector(".item-main");
+      if (itemMain) {
+        itemMain.disabled = false;
+      }
+    }
+  }
+
   function requestDelete(item) {
+    if (state.deleting[String(item.id)]) {
+      return;
+    }
     state.pendingDelete = item;
     state.lastFocus = document.activeElement;
     els.confirmText.textContent =
@@ -334,12 +373,19 @@
   }
 
   function deleteItem(item) {
+    var key = String(item.id);
+    if (state.deleting[key]) {
+      return Promise.resolve();
+    }
+    state.deleting[key] = true;
+    setDeleteLoading(item, true);
     return L.api("/api/audios/" + encodeURIComponent(item.id), { method: "DELETE" })
       .then(function () {
         var wasCurrent = String(state.currentId) === String(item.id);
         state.items = state.items.filter(function (entry) {
           return String(entry.id) !== String(item.id);
         });
+        delete state.deleting[key];
         if (wasCurrent) {
           clearPlayer();
         }
@@ -350,6 +396,8 @@
         L.showToast("已删除音频及服务器文件", "success");
       })
       .catch(function (error) {
+        delete state.deleting[key];
+        setDeleteLoading(item, false);
         L.showToast(error.message || "删除失败", "error", 6000);
       });
   }

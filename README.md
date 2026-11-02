@@ -30,7 +30,8 @@
   - `/` 解析页：粘贴文案、提取、显示进度条和成功入口；
   - `/library` 音乐库：播放器 + 播放列表，不再混入提取表单；
   - 音乐库播放器包含封面、当前曲目、播放/暂停、下一首、播放全部和自动下一首；
-  - 提取期间显示不确定进度条和实时耗时（后端是单次请求，不是伪造百分比）；
+  - 提取期间显示真实阶段百分比、当前阶段和实时耗时；前端按任务 ID 轮询进度接口；
+  - 删除音频时列表行进入“删除中”状态，并禁用该行操作；
   - 大按钮、大字体、适合触控；窄屏自动堆叠；
   - 原生 `<audio controls>`，车机拖动进度条依赖服务端 Range；
   - 列表点击切换、播放/暂停、删除、自动下一首、Media Session 车机媒体键支持。
@@ -58,6 +59,7 @@ link-audio/
 │   ├── downloader.py        # httpx 流式下载、大小/内容/跳转校验
 │   ├── ffmpeg.py            # FFmpeg / ffprobe 子进程封装
 │   ├── audio_service.py     # 图文/视频处理策略、回退、落盘、写库
+│   ├── progress.py          # 提取进度任务（进程内 TTL）
 │   ├── errors.py            # 统一业务错误
 │   ├── models.py            # Pydantic 请求/响应模型
 │   ├── serializers.py       # 数据库记录 -> 前端 JSON
@@ -71,12 +73,13 @@ link-audio/
 │       ├── extract.js         # 解析页逻辑
 │       └── library.js         # 播放器与播放列表逻辑
 ├── tests/
-│   ├── test_api.py          # Range / HEAD / 删除 / 校验测试
+│   ├── test_api.py          # Range / HEAD / 删除 / 进度 / 校验测试
 │   ├── test_db.py           # platform 字段、旧库迁移、去重测试
 │   ├── test_douyin.py       # 分享链接与页面 JSON 解析测试
 │   ├── test_douyin_provider.py # 短链跳转 / iteminfo 兜底测试
 │   ├── test_bilibili.py     # b23 / view / playurl 解析测试
 │   ├── test_downloader.py   # 流式下载 / 大小 / HTML 校验测试
+│   ├── test_progress.py     # 进度任务状态测试
 │   ├── test_registry.py     # provider 分发测试
 │   └── test_service.py      # 图文直链、视频回退策略测试
 ├── data/                    # SQLite（运行时生成，.gitkeep 占位）
@@ -460,9 +463,12 @@ docker compose restart
 
 ```json
 {
-  "share_text": "8.25 复制打开抖音，看看【xxx的作品】…… https://v.douyin.com/xxxxxx/ ……"
+  "share_text": "8.25 复制打开抖音，看看【xxx的作品】…… https://v.douyin.com/xxxxxx/ ……",
+  "job_id": "efa58a2c-2b35-4e0b-a827-e9c7bcdba3c7"
 }
 ```
+
+`job_id` 可选，由前端生成，用于轮询进度；不传时 API 行为不变。
 
 响应（成功，含重复复用）：
 
@@ -489,6 +495,20 @@ docker compose restart
 ```
 
 `duplicate=true` 表示同一 `(platform, aweme_id)` 已有完成记录且文件存在，直接返回旧记录。
+
+### GET `/api/extract/progress/{job_id}`
+
+```json
+{
+  "job_id": "efa58a2c-2b35-4e0b-a827-e9c7bcdba3c7",
+  "percent": 65,
+  "stage": "正在转码为 MP3",
+  "status": "running",
+  "error": null
+}
+```
+
+`status` 为 `running` / `completed` / `failed`。进度保存在进程内，默认保留 15 分钟；因此需要单 worker 运行（Docker 配置已是 `--workers 1`），多 worker 时轮询可能落到没有该任务的进程。
 
 ### GET `/api/audios`
 
@@ -524,7 +544,7 @@ docker compose restart
 ```json
 {
   "status": "ok",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "database": "ok",
   "music_dir": "/app/music",
   "music_dir_writable": true,
@@ -657,7 +677,7 @@ ruff check app tests
 ruff format --check app tests
 ```
 
-当前测试套件共 43 项，覆盖：
+当前测试套件共 46 项，覆盖：
 
 - 分享文案中的链接提取、抖音/哔哩哔哩域名识别、非支持域名拒绝；
 - provider 注册/分发、旧库 `platform` 字段迁移、同 ID 跨平台隔离；
@@ -665,6 +685,7 @@ ruff format --check app tests
 - 流式下载、跳转、HTML 拦截、大小限制；
 - 抖音 `_ROUTER_DATA`、`RENDER_DATA`、目标 `aweme_id` 选择、图文/视频分类；
 - 哔哩哔哩 b23 跳转、view、DASH 音频、超时重试、组合流和移动页兜底；
+- 提取进度任务、百分比/阶段轮询、任务完成状态；
 - 图文直链不调用 FFmpeg；
 - 视频音乐直链过短时回退 FFmpeg；
 - 视频音乐直链完整时直接采用；

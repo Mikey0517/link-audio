@@ -6,6 +6,13 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class ExtractRequest(BaseModel):
+    job_id: str | None = Field(
+        default=None,
+        min_length=8,
+        max_length=80,
+        pattern=r"^[A-Za-z0-9_-]+$",
+        description="客户端生成的进度任务 ID",
+    )
     share_text: str = Field(
         ...,
         min_length=1,
@@ -37,6 +44,14 @@ class AudioOut(BaseModel):
     status: str
     media_type: str
     source_kind: str
+
+
+class ProgressOut(BaseModel):
+    job_id: str
+    percent: int
+    stage: str
+    status: str
+    error: str | None = None
 
 
 class AudioListOut(BaseModel):

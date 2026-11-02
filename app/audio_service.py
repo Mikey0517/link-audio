@@ -22,6 +22,7 @@ from .errors import (
 )
 from .ffmpeg import FFmpegProcessor, is_mp3_file
 from .net import RemoteURLValidator
+from .progress import ProgressReporter
 from .providers import ParsedMedia, ProviderRegistry
 from .storage import resolve_music_file
 
@@ -56,14 +57,20 @@ class ExtractionService:
         self._ffmpeg = ffmpeg
         self._validator = validator
 
-    async def extract(self, share_text: str) -> tuple[dict, bool]:
+    async def extract(
+        self,
+        share_text: str,
+        progress: ProgressReporter | None = None,
+    ) -> tuple[dict, bool]:
         """Return ``(record, duplicate)``.
 
         Parsing happens before a DB row exists. Every failure after that point
         leaves a ``failed`` row with a diagnostic message, as required.
         """
 
+        _report(progress, 2, "正在识别链接")
         parsed = await self._providers.parse(share_text)
+        _report(progress, 18, "已获取作品信息")
 
         existing = await asyncio.to_thread(
             self._db.find_completed_by_media,
@@ -79,6 +86,7 @@ class ExtractionService:
                     parsed.platform,
                     parsed.external_id,
                 )
+                _report(progress, 100, "已在音乐库中")
                 return existing, True
             await asyncio.to_thread(
                 self._db.mark_failed,
@@ -86,6 +94,7 @@ class ExtractionService:
                 "原音频文件已丢失，重新提取",
             )
 
+        _report(progress, 24, "正在创建任务")
         record_id = await asyncio.to_thread(
             self._db.create_processing,
             platform=parsed.platform,
@@ -106,7 +115,12 @@ class ExtractionService:
         final_path: Path | None = None
         marked_completed = False
         try:
-            final_path, source_kind = await self._produce_audio(parsed, record_id)
+            final_path, source_kind = await self._produce_audio(
+                parsed,
+                record_id,
+                progress=progress,
+            )
+            _report(progress, 92, "正在写入音乐库")
             size = final_path.stat().st_size
             # Image direct-download paths deliberately never invoke FFmpeg:
             # their duration comes from the parsed music metadata.
@@ -131,6 +145,7 @@ class ExtractionService:
                     "音频已保存，但数据库记录写入异常",
                     500,
                 )
+            _report(progress, 100, "完成")
             logger.info(
                 "任务完成 id=%s platform=%s media_id=%s kind=%s size=%s duration=%s",
                 record_id,
@@ -186,19 +201,23 @@ class ExtractionService:
         self,
         parsed: ParsedMedia,
         record_id: int,
+        *,
+        progress: ProgressReporter | None = None,
     ) -> tuple[Path, str]:
         require_complete_mix = parsed.media_type == "video"
         prepared, music_error = await self._prepare_music(
             parsed,
             record_id,
             require_complete_mix=require_complete_mix,
+            progress=progress,
         )
 
         if prepared is not None:
-            final_path = await self._finalize(prepared, parsed)
+            final_path = await self._finalize(prepared, parsed, progress=progress)
             return final_path, prepared.source_kind
 
         if parsed.video_urls:
+            _report(progress, 60, "回退视频音轨")
             if parsed.media_type == "video":
                 logger.info(
                     "作品 %s 的音乐直链不可用或不是完整混音，回退到视频抽轨",
@@ -209,8 +228,8 @@ class ExtractionService:
                     "图文作品 %s 的音乐直链不可用，尝试从视频地址提取音轨",
                     parsed.external_id,
                 )
-            prepared_video = await self._extract_video(parsed, record_id)
-            final_path = await self._finalize(prepared_video, parsed)
+            prepared_video = await self._extract_video(parsed, record_id, progress=progress)
+            final_path = await self._finalize(prepared_video, parsed, progress=progress)
             return final_path, prepared_video.source_kind
 
         if music_error is not None:
@@ -223,6 +242,7 @@ class ExtractionService:
         record_id: int,
         *,
         require_complete_mix: bool,
+        progress: ProgressReporter | None = None,
     ) -> tuple[PreparedAudio | None, AppError | None]:
         if not parsed.music_urls:
             return None, None
@@ -233,6 +253,7 @@ class ExtractionService:
             converted_path: Path | None = None
             try:
                 logger.info("下载音乐直链 [%d/%d]", index + 1, len(parsed.music_urls))
+                _report(progress, 35, "正在下载音频")
                 await self._downloader.download(
                     url,
                     temp_path,
@@ -240,6 +261,7 @@ class ExtractionService:
                     origin=parsed.origin,
                     allowed_ports=parsed.media_ports,
                 )
+                _report(progress, 55, "正在校验音频")
                 duration = parsed.duration_seconds
                 if require_complete_mix:
                     duration = await self._ffmpeg.probe_duration(temp_path)
@@ -253,6 +275,7 @@ class ExtractionService:
                         continue
 
                 if is_mp3_file(temp_path):
+                    _report(progress, 80, "音频处理完成")
                     return (
                         PreparedAudio(
                             path=temp_path,
@@ -270,6 +293,7 @@ class ExtractionService:
                 # Rare: a provider returned AAC/M4A at the music URL. Convert it so
                 # the stored file is always a real .mp3.
                 converted_path = self._temp_path(record_id, f"music-converted-{index}")
+                _report(progress, 65, "正在转码为 MP3")
                 await self._ffmpeg.transcode_to_mp3(
                     temp_path,
                     converted_path,
@@ -281,6 +305,7 @@ class ExtractionService:
                     raise FFmpegError("音乐直链转码后不是有效的 MP3 文件")
                 if require_complete_mix:
                     duration = await self._ffmpeg.probe_duration(converted_path) or duration
+                _report(progress, 80, "音频处理完成")
                 return (
                     PreparedAudio(
                         path=converted_path,
@@ -307,6 +332,8 @@ class ExtractionService:
         self,
         parsed: ParsedMedia,
         record_id: int,
+        *,
+        progress: ProgressReporter | None = None,
     ) -> PreparedAudio:
         if not parsed.video_urls:
             raise NoAudioError("未找到可用的视频地址")
@@ -319,6 +346,7 @@ class ExtractionService:
         # command requested in the project spec and avoids a full video copy.
         for index, url in enumerate(parsed.video_urls[:MAX_URL_ATTEMPTS]):
             output_path = self._temp_path(record_id, f"video-direct-{index}")
+            _report(progress, 65, "正在从视频提取音轨")
             try:
                 # FFmpeg performs its own network access, so validate the
                 # host before handing it a URL (SSRF defence in depth).
@@ -338,6 +366,7 @@ class ExtractionService:
                 if not is_mp3_file(output_path):
                     raise FFmpegError("视频抽轨输出不是有效的 MP3 文件")
                 duration = await self._ffmpeg.probe_duration(output_path)
+                _report(progress, 80, "视频音轨处理完成")
                 return PreparedAudio(
                     path=output_path,
                     duration_seconds=duration or parsed.duration_seconds,
@@ -360,6 +389,7 @@ class ExtractionService:
             output_path = self._temp_path(record_id, f"video-local-{index}")
             try:
                 logger.info("FFmpeg 直读失败，改为下载视频后本地抽轨 [%d]", index + 1)
+                _report(progress, 70, "正在下载视频")
                 await self._downloader.download(
                     url,
                     video_temp,
@@ -367,6 +397,7 @@ class ExtractionService:
                     origin=parsed.origin,
                     allowed_ports=parsed.media_ports,
                 )
+                _report(progress, 75, "正在从视频提取音轨")
                 await self._ffmpeg.transcode_to_mp3(
                     video_temp,
                     output_path,
@@ -377,6 +408,7 @@ class ExtractionService:
                 if not is_mp3_file(output_path):
                     raise FFmpegError("视频转码输出不是有效的 MP3 文件")
                 duration = await self._ffmpeg.probe_duration(output_path)
+                _report(progress, 80, "视频音轨处理完成")
                 return PreparedAudio(
                     path=output_path,
                     duration_seconds=duration or parsed.duration_seconds,
@@ -400,11 +432,19 @@ class ExtractionService:
     # ------------------------------------------------------------------
     # File helpers
     # ------------------------------------------------------------------
-    async def _finalize(self, prepared: PreparedAudio, parsed: ParsedMedia) -> Path:
+    async def _finalize(
+        self,
+        prepared: PreparedAudio,
+        parsed: ParsedMedia,
+        *,
+        progress: ProgressReporter | None = None,
+    ) -> Path:
+        _report(progress, 88, "正在保存文件")
         safe_id = re.sub(r"[^A-Za-z0-9_-]", "", parsed.external_id)[:40] or uuid.uuid4().hex
         filename = f"{safe_id}_{uuid.uuid4().hex[:10]}.mp3"
         destination = self._settings.music_dir / filename
         await asyncio.to_thread(os.replace, prepared.path, destination)
+        _report(progress, 92, "文件已保存")
         logger.info("音频已保存: %s", destination.name)
         return destination
 
@@ -455,3 +495,8 @@ def _is_complete_mix(
             f"音乐时长 {audio_duration:.1f}s 明显长于视频 {video_duration:.1f}s",
         )
     return True, ""
+
+
+def _report(progress: ProgressReporter | None, percent: int, stage: str) -> None:
+    if progress is not None:
+        progress(percent, stage)

@@ -35,8 +35,10 @@ from .models import (
     ExtractRequest,
     ExtractResponse,
     HealthOut,
+    ProgressOut,
 )
 from .net import RemoteURLValidator
+from .progress import ProgressStore
 from .providers import BilibiliProvider, DouyinProvider, ProviderRegistry
 from .serializers import serialize_audio
 from .storage import resolve_music_file
@@ -90,6 +92,7 @@ async def lifespan(app: FastAPI):
     app.state.ffmpeg = ffmpeg
     app.state.providers = providers
     app.state.service = service
+    app.state.progress = ProgressStore()
     app.state.semaphore = asyncio.Semaphore(settings.max_concurrent_extractions)
     app.state.active_extractions = 0
 
@@ -229,20 +232,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 ) from exc
 
         request.app.state.active_extractions += 1
+        job = None
+        if payload.job_id:
+            job = request.app.state.progress.create(payload.job_id)
+            job.report(1, "准备提取")
         try:
-            record, duplicate = await service.extract(payload.share_text)
+            record, duplicate = await service.extract(
+                payload.share_text,
+                progress=job.report if job is not None else None,
+            )
+            data = serialize_audio(record)
+            if job is not None:
+                job.complete()
             return {
                 "success": True,
                 "duplicate": duplicate,
-                "data": serialize_audio(record),
+                "data": data,
             }
         except AppError as exc:
+            if job is not None:
+                job.fail(exc.code, exc.message)
             logger.warning("提取失败: code=%s message=%s", exc.code, exc.message)
             raise HTTPException(
                 status_code=exc.http_status,
                 detail=exc.as_dict(),
             ) from exc
         except Exception as exc:  # noqa: BLE001
+            if job is not None:
+                job.fail("INTERNAL_ERROR", "服务器处理失败")
             logger.exception("提取接口异常")
             raise HTTPException(
                 status_code=500,
@@ -254,6 +271,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             request.app.state.active_extractions = max(0, request.app.state.active_extractions - 1)
             semaphore.release()
+
+    @app.get("/api/extract/progress/{job_id}", response_model=ProgressOut)
+    async def extract_progress(job_id: str, request: Request):
+        job = request.app.state.progress.get(job_id)
+        if job is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "PROGRESS_NOT_FOUND", "message": "进度任务不存在或已过期"},
+            )
+        return job.snapshot()
 
     @app.get("/api/audios", response_model=AudioListOut)
     async def list_audios(request: Request):

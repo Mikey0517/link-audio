@@ -180,3 +180,51 @@ def test_validation_error_is_json(app_client) -> None:
     response = client.post("/api/extract", json={"share_text": "   "})
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "VALIDATION_ERROR"
+
+
+def test_progress_endpoint_unknown_job(app_client) -> None:
+    _app, client, _settings = app_client
+    response = client.get("/api/extract/progress/not-a-real-job")
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "PROGRESS_NOT_FOUND"
+
+
+def test_extract_reports_progress(app_client) -> None:
+    app, client, _settings = app_client
+
+    class FakeService:
+        async def extract(self, share_text, progress=None):
+            if progress:
+                progress(30, "正在下载音频")
+                progress(80, "正在转码为 MP3")
+            return (
+                {
+                    "id": 1,
+                    "platform": "bilibili",
+                    "aweme_id": "BV1Dg4y1K7dN",
+                    "title": "进度测试",
+                    "author": "UP",
+                    "source_url": "https://b23.tv/test",
+                    "file_path": "test.mp3",
+                    "file_size": 100,
+                    "duration_seconds": 10,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "status": "completed",
+                    "media_type": "video",
+                    "source_kind": "music_transcoded",
+                },
+                False,
+            )
+
+    app.state.service = FakeService()
+    response = client.post(
+        "/api/extract",
+        json={"share_text": "https://b23.tv/test", "job_id": "test-job-123"},
+    )
+    assert response.status_code == 200
+    progress = client.get("/api/extract/progress/test-job-123")
+    assert progress.status_code == 200
+    body = progress.json()
+    assert body["status"] == "completed"
+    assert body["percent"] == 100
+    assert body["stage"] == "完成"
