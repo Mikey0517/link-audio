@@ -16,6 +16,8 @@ class ProgressJob:
     stage: str = "排队中"
     status: str = "running"
     error: str | None = None
+    result: dict | None = None
+    duplicate: bool = False
     updated_at: float = field(default_factory=time.monotonic)
 
     def report(self, percent: int, stage: str) -> None:
@@ -29,10 +31,12 @@ class ProgressJob:
         self.stage = str(stage or self.stage)
         self.updated_at = time.monotonic()
 
-    def complete(self) -> None:
+    def complete(self, result: dict | None = None, duplicate: bool = False) -> None:
         self.percent = 100
         self.stage = "完成"
         self.status = "completed"
+        self.result = result
+        self.duplicate = duplicate
         self.updated_at = time.monotonic()
 
     def fail(self, code: str, message: str) -> None:
@@ -48,6 +52,8 @@ class ProgressJob:
             "stage": self.stage,
             "status": self.status,
             "error": self.error,
+            "duplicate": self.duplicate,
+            "result": self.result,
         }
 
 

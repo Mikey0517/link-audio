@@ -34,11 +34,12 @@ from .models import (
     DeleteResponse,
     ExtractRequest,
     ExtractResponse,
+    ExtractStartedOut,
     HealthOut,
     ProgressOut,
 )
 from .net import RemoteURLValidator
-from .progress import ProgressStore
+from .progress import ProgressJob, ProgressStore
 from .providers import BilibiliProvider, DouyinProvider, ProviderRegistry
 from .serializers import serialize_audio
 from .storage import resolve_music_file
@@ -53,6 +54,55 @@ STREAM_CHUNK_SIZE = 64 * 1024
 
 class RangeNotSatisfiable(Exception):
     pass
+
+
+async def _run_extraction_job(app: FastAPI, job: ProgressJob, share_text: str) -> None:
+    """Run a proxy-friendly extraction task and publish its result via progress."""
+
+    settings: Settings = app.state.settings
+    semaphore: asyncio.Semaphore = app.state.semaphore
+    service: ExtractionService = app.state.service
+    acquired = False
+    try:
+        if settings.queue_timeout_seconds <= 0:
+            if semaphore.locked():
+                job.fail("BUSY", "当前提取任务已满，请稍后重试")
+                return
+            await semaphore.acquire()
+            acquired = True
+        else:
+            try:
+                await asyncio.wait_for(
+                    semaphore.acquire(),
+                    timeout=settings.queue_timeout_seconds,
+                )
+            except TimeoutError:
+                job.fail("BUSY", "服务器提取任务繁忙，请稍后重试")
+                return
+            acquired = True
+
+        app.state.active_extractions += 1
+        job.report(1, "准备提取")
+        try:
+            record, duplicate = await service.extract(share_text, progress=job.report)
+            data = serialize_audio(record)
+            job.complete(data, duplicate)
+        except AppError as exc:
+            logger.warning("后台提取失败: code=%s message=%s", exc.code, exc.message)
+            job.fail(exc.code, exc.message)
+        except asyncio.CancelledError:
+            job.fail("CANCELLED", "任务已取消")
+            raise
+        except Exception:  # noqa: BLE001
+            logger.exception("后台提取异常")
+            job.fail("INTERNAL_ERROR", "服务器处理失败，请查看服务端日志")
+        finally:
+            app.state.active_extractions = max(0, app.state.active_extractions - 1)
+            semaphore.release()
+            acquired = False
+    finally:
+        if acquired:
+            semaphore.release()
 
 
 @asynccontextmanager
@@ -95,6 +145,7 @@ async def lifespan(app: FastAPI):
     app.state.progress = ProgressStore()
     app.state.semaphore = asyncio.Semaphore(settings.max_concurrent_extractions)
     app.state.active_extractions = 0
+    app.state.extraction_tasks: set[asyncio.Task] = set()
 
     logger.info(
         "启动完成: MUSIC_DIR=%s DB_PATH=%s 并发=%d 平台=%s",
@@ -117,6 +168,11 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        tasks = list(app.state.extraction_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         await client.aclose()
         logger.info("服务已停止")
 
@@ -200,8 +256,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
-    @app.post("/api/extract", response_model=ExtractResponse)
+    @app.post("/api/extract", response_model=ExtractResponse | ExtractStartedOut)
     async def extract_audio(payload: ExtractRequest, request: Request):
+        if payload.job_id:
+            job = request.app.state.progress.create(payload.job_id)
+            job.report(0, "排队中")
+            task = asyncio.create_task(_run_extraction_job(request.app, job, payload.share_text))
+            request.app.state.extraction_tasks.add(task)
+            task.add_done_callback(request.app.state.extraction_tasks.discard)
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "success": True,
+                    "status": "running",
+                    "job_id": payload.job_id,
+                },
+            )
+
         settings: Settings = request.app.state.settings
         semaphore: asyncio.Semaphore = request.app.state.semaphore
         service: ExtractionService = request.app.state.service
@@ -232,34 +303,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 ) from exc
 
         request.app.state.active_extractions += 1
-        job = None
-        if payload.job_id:
-            job = request.app.state.progress.create(payload.job_id)
-            job.report(1, "准备提取")
         try:
-            record, duplicate = await service.extract(
-                payload.share_text,
-                progress=job.report if job is not None else None,
-            )
-            data = serialize_audio(record)
-            if job is not None:
-                job.complete()
+            record, duplicate = await service.extract(payload.share_text)
             return {
                 "success": True,
                 "duplicate": duplicate,
-                "data": data,
+                "data": serialize_audio(record),
             }
         except AppError as exc:
-            if job is not None:
-                job.fail(exc.code, exc.message)
             logger.warning("提取失败: code=%s message=%s", exc.code, exc.message)
             raise HTTPException(
                 status_code=exc.http_status,
                 detail=exc.as_dict(),
             ) from exc
         except Exception as exc:  # noqa: BLE001
-            if job is not None:
-                job.fail("INTERNAL_ERROR", "服务器处理失败")
             logger.exception("提取接口异常")
             raise HTTPException(
                 status_code=500,

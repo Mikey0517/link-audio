@@ -419,7 +419,7 @@ docker compose restart
 | `DB_PATH` | `./data/music.db` | SQLite 文件；Docker 内为 `/app/data/music.db` |
 | `MAX_DOWNLOAD_MB` | `500` | 单个下载/转码输出上限（MB） |
 | `MAX_CONCURRENT_EXTRACTIONS` | `2` | 单进程同时提取任务数 |
-| `QUEUE_TIMEOUT_SECONDS` | `45` | 并发满时排队超时，超时返回 429 |
+| `QUEUE_TIMEOUT_SECONDS` | `45` | 并发满时排队超时；同步 API 返回 429，异步任务标记为失败 |
 | `PAGE_TIMEOUT_SECONDS` | `20` | 请求分享页 HTML 的超时 |
 | `BILIBILI_API_TIMEOUT_SECONDS` | `30` | 哔哩哔哩 view/playurl 接口超时 |
 | `BILIBILI_API_RETRIES` | `2` | 哔哩哔哩接口网络失败重试次数 |
@@ -468,9 +468,19 @@ docker compose restart
 }
 ```
 
-`job_id` 可选，由前端生成，用于轮询进度；不传时 API 行为不变。
+`job_id` 可选，由前端生成。传入 `job_id` 时接口只启动后台任务并**立即返回 `202`**，不会再让代理等待下载/转码；结果通过进度接口返回。不传 `job_id` 时保持原来的同步行为。
 
-响应（成功，含重复复用）：
+异步启动响应：
+
+```json
+{
+  "success": true,
+  "status": "running",
+  "job_id": "efa58a2c-2b35-4e0b-a827-e9c7bcdba3c7"
+}
+```
+
+同步响应（未传 `job_id`，成功，含重复复用）：
 
 ```json
 {
@@ -504,11 +514,27 @@ docker compose restart
   "percent": 65,
   "stage": "正在转码为 MP3",
   "status": "running",
-  "error": null
+  "error": null,
+  "duplicate": false,
+  "result": null
 }
 ```
 
-`status` 为 `running` / `completed` / `failed`。进度保存在进程内，默认保留 15 分钟；因此需要单 worker 运行（Docker 配置已是 `--workers 1`），多 worker 时轮询可能落到没有该任务的进程。
+完成后：
+
+```json
+{
+  "job_id": "efa58a2c-2b35-4e0b-a827-e9c7bcdba3c7",
+  "percent": 100,
+  "stage": "完成",
+  "status": "completed",
+  "error": null,
+  "duplicate": false,
+  "result": { "id": 1, "platform": "bilibili", "...": "AudioOut" }
+}
+```
+
+`status` 为 `running` / `completed` / `failed`。前端只轮询这一个接口，因此 Cloudflare/Nginx 的 524 不会再把已经成功的任务显示成失败。进度保存在进程内，默认保留 15 分钟；因此需要单 worker 运行（Docker 配置已是 `--workers 1`），多 worker 时轮询可能落到没有该任务的进程。
 
 ### GET `/api/audios`
 
@@ -544,7 +570,7 @@ docker compose restart
 ```json
 {
   "status": "ok",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "database": "ok",
   "music_dir": "/app/music",
   "music_dir_writable": true,
@@ -753,7 +779,13 @@ Docker 镜像已经内置，若仍提示，检查是否用了旧的镜像，重�
 
 日志中 `source_kind=music` 表示纯直接下载；`music_transcoded` 表示做了转码。
 
-### 6. 车机拖不动进度条
+### 6. 反向代理返回 524，但音乐已经保存
+
+现在浏览器端的解析请求会带 `job_id`，后端立即返回 `202` 并在后台执行下载/转码；页面通过 `/api/extract/progress/{job_id}` 获取百分比和最终结果。因此 Cloudflare 的 100 秒超时不会再中断任务展示。
+
+如果代理仍返回 524，页面会继续轮询一段时间；任务完成后会直接显示成功，而不是报错。
+
+### 7. 车机拖不动进度条
 
 按上面的 Range 验证步骤检查：
 
@@ -774,7 +806,7 @@ proxy_buffering off;
 
 并确保代理没有把响应缓存成固定 200 全量。
 
-### 7. 局域网/车机打不开页面
+### 8. 局域网/车机打不开页面
 
 - 服务绑定 `0.0.0.0`；
 - 使用服务器局域网 IP，不是 `localhost`；
@@ -782,7 +814,7 @@ proxy_buffering off;
 - WSL2 需要端口映射或改用 Docker Desktop；
 - 车机浏览器可能只支持 HTTP，若前面加了 HTTPS 自签证书可能被拒绝。
 
-### 8. Docker 启动后权限错误 / 无法写 music
+### 9. Docker 启动后权限错误 / 无法写 music
 
 宿主机目录所有者与容器用户不一致。执行：
 
@@ -792,11 +824,11 @@ sudo chown -R "$(id -u):$(id -g)" music data
 
 并在 `.env` 设置正确的 `PUID` / `PGID`。
 
-### 9. 音乐直链下载成功但视频仍回退 FFmpeg
+### 10. 音乐直链下载成功但视频仍回退 FFmpeg
 
 这是有意设计。视频作品会检查音乐时长是否接近视频时长；如果 `music.play_url` 只是 BGM 片段，或时长无法探测/明显不匹配，就回退视频抽轨。要接受音乐直链，需要能探测出与视频接近的时长。
 
-### 10. 想清理失败记录
+### 11. 想清理失败记录
 
 `/api/audios` 不显示失败记录。需要手动查看：
 
@@ -806,7 +838,7 @@ sqlite3 data/music.db "SELECT id, platform, aweme_id, status, error_message FROM
 
 不要在服务运行时用其他进程长时间锁库；SQLite 已开启 WAL 和 busy timeout，但个人使用仍建议单实例。
 
-### 11. 文件名/中文乱码
+### 12. 文件名/中文乱码
 
 磁盘文件名只使用 `media_id + 随机十六进制`，不含中文。标题、作者作为 UTF-8 元数据保存在 SQLite，并显示在前端。MP3 内的 ID3 标签仅由 FFmpeg 转码路径写入。
 

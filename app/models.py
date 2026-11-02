@@ -52,6 +52,14 @@ class ProgressOut(BaseModel):
     stage: str
     status: str
     error: str | None = None
+    duplicate: bool = False
+    result: AudioOut | None = None
+
+
+class ExtractStartedOut(BaseModel):
+    success: bool = True
+    status: str = "running"
+    job_id: str
 
 
 class AudioListOut(BaseModel):

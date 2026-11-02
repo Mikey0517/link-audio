@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -221,10 +222,20 @@ def test_extract_reports_progress(app_client) -> None:
         "/api/extract",
         json={"share_text": "https://b23.tv/test", "job_id": "test-job-123"},
     )
-    assert response.status_code == 200
-    progress = client.get("/api/extract/progress/test-job-123")
-    assert progress.status_code == 200
-    body = progress.json()
+    assert response.status_code == 202
+    assert response.json()["status"] == "running"
+
+    body = {}
+    for _ in range(100):
+        progress = client.get("/api/extract/progress/test-job-123")
+        assert progress.status_code == 200
+        body = progress.json()
+        if body["status"] != "running":
+            break
+        time.sleep(0.02)
+
     assert body["status"] == "completed"
     assert body["percent"] == 100
     assert body["stage"] == "完成"
+    assert body["result"]["title"] == "进度测试"
+    assert body["duplicate"] is False

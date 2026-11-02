@@ -26,6 +26,9 @@
     progressStart: 0,
     progressDone: false,
     polling: false,
+    resultHandled: false,
+    postError: null,
+    postErrorAt: 0,
   };
 
   function pad2(value) {
@@ -90,11 +93,22 @@
         }
         setProgress(data.percent, data.stage);
         if (data.status === "completed") {
-          setProgress(100, "完成");
+          if (data.result) {
+            handleExtractResult(data.result, data.duplicate);
+          } else {
+            handleExtractFailure("任务已完成，但未返回音频信息");
+          }
+        } else if (data.status === "failed") {
+          handleExtractFailure(data.error || "后台提取失败");
         }
       })
       .catch(function () {
-        /* the job may not be registered yet; keep the elapsed time running */
+        /* The job may not be registered yet. If the start request itself
+           failed (for example a proxy 524), keep polling briefly because the
+           background task can still finish. */
+        if (state.postError && Date.now() - state.postErrorAt > 15000) {
+          handleExtractFailure(state.postError);
+        }
       })
       .then(function () {
         state.polling = false;
@@ -116,6 +130,9 @@
   function startProgress() {
     stopProgressTimer();
     state.progressDone = false;
+    state.resultHandled = false;
+    state.postError = null;
+    state.postErrorAt = 0;
     state.progressStart = Date.now();
     setProgress(0, "正在排队");
     els.progressElapsed.textContent = "0s";
@@ -173,6 +190,32 @@
     els.successActions.hidden = true;
   }
 
+  function handleExtractResult(item, duplicate) {
+    if (state.resultHandled) {
+      return;
+    }
+    state.resultHandled = true;
+    hideNotice();
+    var name = item && item.title ? "《" + item.title + "》" : "音频";
+    finishProgress();
+    els.successHeading.textContent = duplicate ? "已在音乐库中" : "已保存到音乐库";
+    els.successTitle.textContent = name;
+    els.shareText.value = "";
+    els.successActions.hidden = false;
+    if (els.successLink && item && item.id) {
+      els.successLink.setAttribute("href", "/library");
+    }
+  }
+
+  function handleExtractFailure(message) {
+    if (state.resultHandled) {
+      return;
+    }
+    state.resultHandled = true;
+    setExtracting(false);
+    setNotice("error", message || "提取失败，请稍后重试。");
+  }
+
   function extractAudio() {
     if (state.extracting) {
       return;
@@ -195,20 +238,27 @@
       body: JSON.stringify({ share_text: text, job_id: state.jobId }),
     })
       .then(function (payload) {
-        var item = payload && payload.data;
-        var name = item && item.title ? "《" + item.title + "》" : "音频";
-        finishProgress();
-        els.successHeading.textContent = payload && payload.duplicate ? "已在音乐库中" : "已保存到音乐库";
-        els.successTitle.textContent = name;
-        els.shareText.value = "";
-        els.successActions.hidden = false;
-        if (els.successLink && item && item.id) {
-          els.successLink.setAttribute("href", "/library");
+        if (payload && payload.data) {
+          handleExtractResult(payload.data, payload.duplicate);
+          return;
         }
+        if (payload && payload.status === "running") {
+          /* The POST only starts the background task; progress polling owns
+             the result and will finish this extraction. */
+          return;
+        }
+        handleExtractFailure("提取任务未启动，请稍后重试。");
       })
       .catch(function (error) {
-        setExtracting(false);
-        setNotice("error", error.message || "提取失败，请稍后重试。");
+        if (error.status && error.status < 500 && error.status !== 408) {
+          handleExtractFailure(error.message);
+          return;
+        }
+        /* A proxy timeout (524/502/504) does not mean the task stopped.
+           Keep polling the progress endpoint instead of showing failure. */
+        state.postError = error.message || "请求失败，正在确认后台任务。";
+        state.postErrorAt = Date.now();
+        setNotice("info", "请求超时，正在等待后台任务结果…");
       });
   }
 
