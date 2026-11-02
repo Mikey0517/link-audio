@@ -64,7 +64,7 @@ def test_health_and_empty_list(app_client) -> None:
     body = response.json()
     assert body["database"] == "ok"
     assert body["music_dir_writable"] is True
-    assert body["providers"] == ["douyin"]
+    assert body["providers"] == ["douyin", "bilibili"]
 
     response = client.get("/api/audios")
     assert response.status_code == 200

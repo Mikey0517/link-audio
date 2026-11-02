@@ -15,7 +15,9 @@ class FakeDownloader:
         self.fail_music = fail_music
         self.requested: list[str] = []
 
-    async def download(self, url, destination: Path, *, referer=None, origin=None, max_bytes=None):
+    async def download(
+        self, url, destination: Path, *, referer=None, origin=None, allowed_ports=(), max_bytes=None
+    ):
         self.requested.append(url)
         if self.fail_music and "music" in url:
             raise DownloadError("模拟音乐下载失败")

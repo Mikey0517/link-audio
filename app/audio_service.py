@@ -238,6 +238,7 @@ class ExtractionService:
                     temp_path,
                     referer=parsed.referer,
                     origin=parsed.origin,
+                    allowed_ports=parsed.media_ports,
                 )
                 duration = parsed.duration_seconds
                 if require_complete_mix:
@@ -322,7 +323,10 @@ class ExtractionService:
                 # FFmpeg performs its own network access, so validate the
                 # host before handing it a URL (SSRF defence in depth).
                 if self._validator is not None:
-                    await self._validator.validate(url)
+                    await self._validator.validate(
+                        url,
+                        allowed_ports=parsed.media_ports,
+                    )
                 await self._ffmpeg.extract_audio_from_url(
                     url,
                     output_path,
@@ -361,6 +365,7 @@ class ExtractionService:
                     video_temp,
                     referer=parsed.referer,
                     origin=parsed.origin,
+                    allowed_ports=parsed.media_ports,
                 )
                 await self._ffmpeg.transcode_to_mp3(
                     video_temp,

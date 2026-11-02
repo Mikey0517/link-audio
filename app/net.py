@@ -23,7 +23,7 @@ def normalise_host(host: str | None) -> str:
     return host
 
 
-def validate_http_url(url: str) -> str:
+def validate_http_url(url: str, *, allowed_ports: tuple[int, ...] = ()) -> str:
     """Validate scheme, credentials, host and port for a generic remote URL."""
 
     try:
@@ -40,7 +40,7 @@ def validate_http_url(url: str) -> str:
         port = parsed.port
     except ValueError as exc:
         raise UnsafeURLError("链接端口无效") from exc
-    if port not in (None, 80, 443):
+    if port not in (None, 80, 443) and port not in allowed_ports:
         raise UnsafeURLError("不支持非标准端口")
     return url
 
@@ -57,8 +57,9 @@ class RemoteURLValidator:
         url: str,
         *,
         allowed_domains: tuple[str, ...] | None = None,
+        allowed_ports: tuple[int, ...] = (),
     ) -> str:
-        validate_http_url(url)
+        validate_http_url(url, allowed_ports=allowed_ports)
         if allowed_domains is not None:
             host = normalise_host(urlsplit(url).hostname)
             if not any(host == domain or host.endswith("." + domain) for domain in allowed_domains):

@@ -37,7 +37,7 @@ from .models import (
     HealthOut,
 )
 from .net import RemoteURLValidator
-from .providers import DouyinProvider, ProviderRegistry
+from .providers import BilibiliProvider, DouyinProvider, ProviderRegistry
 from .serializers import serialize_audio
 from .storage import resolve_music_file
 
@@ -75,7 +75,12 @@ async def lifespan(app: FastAPI):
         limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
     )
     validator = RemoteURLValidator(settings)
-    providers = ProviderRegistry([DouyinProvider(settings, client, validator)])
+    providers = ProviderRegistry(
+        [
+            DouyinProvider(settings, client, validator),
+            BilibiliProvider(settings, client, validator),
+        ]
+    )
     downloader = HTTPDownloader(settings, client, validator)
     ffmpeg = FFmpegProcessor(settings)
     service = ExtractionService(settings, db, providers, downloader, ffmpeg, validator)

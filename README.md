@@ -2,7 +2,7 @@
 
 把分享文案/短链接中的音频转成 MP3，保存在自己的服务器磁盘和 SQLite 中，并提供一个适合手机、车机浏览器触摸操作的解析页和独立音乐库。
 
-项目采用 **provider（来源平台）架构**：抖音是当前实现的第一个 provider，后续可以增加小红书、B 站、YouTube 等来源，而不用改动存储、Range 播放、前端播放器和删除逻辑。
+项目采用 **provider（来源平台）架构**：当前支持抖音、哔哩哔哩，后续可以继续增加其他来源，而不用改动存储、Range 播放、前端播放器和删除逻辑。
 
 > 仅供个人学习与自用。不实现批量爬取、不绕过登录/付费/风控，不提供商业分发能力。请遵守各平台的服务条款和所在地法律，只处理你有权保存的内容。
 
@@ -11,8 +11,9 @@
 ## 功能
 
 - 粘贴**整段分享文案**即可提取，由 provider 注册表识别来源并提取链接。
-- 当前内置抖音 provider：只允许 `douyin.com`、`v.douyin.com`、`iesdouyin.com` 及其子域名，手动跟随跳转并逐跳校验，降低 SSRF 风险。
-- 使用移动端 User-Agent 请求抖音分享页，解析 `window._ROUTER_DATA`、`RENDER_DATA`、`__INITIAL_STATE__` 等内嵌 JSON，并提供公开接口/备用分享页兜底。
+- 当前内置抖音、哔哩哔哩 provider；只允许各平台白名单域名，手动跟随跳转并逐跳校验，降低 SSRF 风险。
+- 抖音：移动端分享页、`_ROUTER_DATA` / `RENDER_DATA` 等内嵌 JSON，以及公开接口/备用页兜底。
+- 哔哩哔哩：解析 `b23.tv` 短链，调用公开的 view/playurl 接口，优先使用 DASH 音频流，失败时回退组合视频流抽轨。
 - 平台无关的存储、下载、FFmpeg、Range 流式播放、前端播放器逻辑已经独立于抖音；数据库记录 `platform` 字段。
 - 自动区分**图文作品**和**视频作品**：
   - 图文：优先直接下载 `music.play_url.url_list` 的 MP3，正常路径不调用 FFmpeg。
@@ -51,6 +52,7 @@ link-audio/
 │   ├── providers/
 │   │   ├── base.py          # BaseProvider / ParsedMedia 契约
 │   │   ├── douyin.py        # 抖音 provider：链接、页面、JSON 解析
+│   │   ├── bilibili.py      # 哔哩哔哩 provider：b23、DASH 音频、组合流兜底
 │   │   ├── registry.py      # provider 注册、链接分发
 │   │   └── __init__.py
 │   ├── downloader.py        # httpx 流式下载、大小/内容/跳转校验
@@ -73,6 +75,7 @@ link-audio/
 │   ├── test_db.py           # platform 字段、旧库迁移、去重测试
 │   ├── test_douyin.py       # 分享链接与页面 JSON 解析测试
 │   ├── test_douyin_provider.py # 短链跳转 / iteminfo 兜底测试
+│   ├── test_bilibili.py     # b23 / view / playurl 解析测试
 │   ├── test_downloader.py   # 流式下载 / 大小 / HTML 校验测试
 │   ├── test_registry.py     # provider 分发测试
 │   └── test_service.py      # 图文直链、视频回退策略测试
@@ -414,13 +417,13 @@ docker compose restart
 | `MAX_DOWNLOAD_MB` | `500` | 单个下载/转码输出上限（MB） |
 | `MAX_CONCURRENT_EXTRACTIONS` | `2` | 单进程同时提取任务数 |
 | `QUEUE_TIMEOUT_SECONDS` | `45` | 并发满时排队超时，超时返回 429 |
-| `PAGE_TIMEOUT_SECONDS` | `20` | 请求分享页 HTML 的超时 |
+| `PAGE_TIMEOUT_SECONDS` | `20` | 请求分享页 / 平台接口的超时 |
 | `DOWNLOAD_TIMEOUT_SECONDS` | `300` | 下载音频/视频的超时 |
 | `FFMPEG_TIMEOUT_SECONDS` | `600` | FFmpeg 子进程超时 |
 | `MAX_PAGE_BYTES` | `8388608` | 页面 HTML 最大读取体积 |
 | `SSRF_DNS_CHECK` | `true` | 对页面/媒体域名做公网 IP 校验；关闭后仍保留各 provider 的域名白名单 |
-| `USER_AGENT` | 移动端 Safari UA | 请求分享页面/媒体的 UA |
-| `DOUYIN_REFERER` | `https://www.douyin.com/` | 请求页面和媒体的 Referer |
+| `USER_AGENT` | 移动端 Safari UA | 请求分享页面、平台接口/媒体的 UA |
+| `DOUYIN_REFERER` | `https://www.douyin.com/` | 抖音 provider 的 Referer |
 | `FFMPEG_BIN` | `ffmpeg` | FFmpeg 命令或绝对路径 |
 | `FFPROBE_BIN` | `ffprobe` | ffprobe 命令或绝对路径 |
 | `LOG_LEVEL` | `INFO` | `DEBUG/INFO/WARNING/ERROR/CRITICAL` |
@@ -428,7 +431,7 @@ docker compose restart
 | `PUID` / `PGID` | `1000` | Docker Compose 运行用户 |
 | `TZ` | `Asia/Shanghai` | 容器时区 |
 
-> `SSRF_DNS_CHECK=false` 只建议在特殊代理/DNS 环境中用来排查问题。页面请求仍只允许当前 provider 的白名单域名，媒体 URL 也必须是 http/https 且不能带认证信息。
+> `SSRF_DNS_CHECK=false` 只建议在特殊代理/DNS 环境中用来排查问题。页面请求仍只允许当前 provider 的白名单域名，媒体 URL 也必须是 http/https 且不能带认证信息。哔哩哔哩 CDN 使用 8082/4483 等媒体端口，已作为 provider 专用端口放行。
 
 ---
 
@@ -519,7 +522,7 @@ docker compose restart
 ```json
 {
   "status": "ok",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "database": "ok",
   "music_dir": "/app/music",
   "music_dir_writable": true,
@@ -528,7 +531,7 @@ docker compose restart
   "ffprobe_available": true,
   "active_extractions": 0,
   "max_concurrent_extractions": 2,
-  "providers": ["douyin"]
+  "providers": ["douyin", "bilibili"]
 }
 ```
 
@@ -652,13 +655,14 @@ ruff check app tests
 ruff format --check app tests
 ```
 
-当前测试套件共 38 项，覆盖：
+当前测试套件共 40 项，覆盖：
 
-- 分享文案中的链接提取、非抖音域名拒绝、裸域名补全；
+- 分享文案中的链接提取、抖音/哔哩哔哩域名识别、非支持域名拒绝；
 - provider 注册/分发、旧库 `platform` 字段迁移、同 ID 跨平台隔离；
 - 手动跟随短链、页面 JSON 网络层、iteminfo 兜底；
 - 流式下载、跳转、HTML 拦截、大小限制；
-- `_ROUTER_DATA`、`RENDER_DATA`、目标 `aweme_id` 选择、图文/视频分类；
+- 抖音 `_ROUTER_DATA`、`RENDER_DATA`、目标 `aweme_id` 选择、图文/视频分类；
+- 哔哩哔哩 b23 跳转、view、DASH 音频和组合流兜底；
 - 图文直链不调用 FFmpeg；
 - 视频音乐直链过短时回退 FFmpeg；
 - 视频音乐直链完整时直接采用；
@@ -804,7 +808,8 @@ sqlite3 data/music.db "SELECT id, platform, aweme_id, status, error_message FROM
 
 - 没有登录/多用户隔离，**只适合个人可信局域网**；
 - 不做批量抓取、不绕过登录/验证码/付费；
-- 抖音页面和接口可能随时变化；新版移动分享页可能把作品数据改为客户端请求，若页面 HTML 只有 `_ROUTER_DATA` 上下文而没有 `item_list`，需要根据新接口更新解析器；
+- 抖音、哔哩哔哩页面和接口可能随时变化；新版抖音移动分享页可能把作品数据改为客户端请求，若页面 HTML 只有 `_ROUTER_DATA` 上下文而没有 `item_list`，需要根据新接口更新解析器；
+- 哔哩哔哩仅支持公开可访问视频；登录、付费、地区限制或版权限制的视频可能失败；
 - 音乐直链是否为“完整混音”是启发式判断；
 - 单进程并发限制，不适合多 worker 横向扩展；
 - 不建议把 `music/` 目录直接暴露为静态文件，请始终通过 `/audio/{id}` 访问；

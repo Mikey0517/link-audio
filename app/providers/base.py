@@ -22,6 +22,7 @@ class ParsedMedia:
     duration_seconds: float | None = None
     referer: str | None = None
     origin: str | None = None
+    media_ports: tuple[int, ...] = ()
 
     @property
     def media_id(self) -> str:

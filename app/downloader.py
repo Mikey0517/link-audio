@@ -58,6 +58,7 @@ class HTTPDownloader:
         *,
         referer: str | None = None,
         origin: str | None = None,
+        allowed_ports: tuple[int, ...] = (),
         max_bytes: int | None = None,
     ) -> DownloadResult:
         """Download ``url`` into ``destination`` atomically-ish.
@@ -76,6 +77,7 @@ class HTTPDownloader:
                     destination,
                     referer=referer,
                     origin=origin,
+                    allowed_ports=allowed_ports,
                     max_bytes=limit,
                 )
         except TimeoutError as exc:
@@ -96,11 +98,12 @@ class HTTPDownloader:
         *,
         referer: str | None,
         origin: str | None,
+        allowed_ports: tuple[int, ...],
         max_bytes: int,
     ) -> DownloadResult:
         current = url
         for _hop in range(7):
-            await self._validator.validate(current)
+            await self._validator.validate(current, allowed_ports=allowed_ports)
             try:
                 async with self._http.stream(
                     "GET",

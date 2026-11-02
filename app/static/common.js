@@ -3,6 +3,7 @@
 
   var platformLabels = {
     douyin: "抖音",
+    bilibili: "哔哩哔哩",
   };
 
   var dateFormatter = null;
@@ -110,7 +111,9 @@
 
   function sourceLabel(item) {
     var source;
-    if (item.source_kind === "video_ffmpeg") {
+    if (item.platform === "bilibili") {
+      source = item.source_kind === "video_ffmpeg" ? "视频音轨" : "视频音轨（转码）";
+    } else if (item.source_kind === "video_ffmpeg") {
       source = "视频完整音轨";
     } else if (item.source_kind === "music_transcoded") {
       source = item.media_type === "image" ? "图文原声（转码）" : "原声（转码）";
