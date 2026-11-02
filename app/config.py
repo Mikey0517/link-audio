@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     max_concurrent_extractions: int = Field(default=2, ge=1, le=16)
     queue_timeout_seconds: float = Field(default=45.0, ge=0, le=600)
     page_timeout_seconds: float = Field(default=20.0, ge=3, le=120)
+    bilibili_api_timeout_seconds: float = Field(default=30.0, ge=5, le=180)
+    bilibili_api_retries: int = Field(default=2, ge=1, le=4)
     download_timeout_seconds: float = Field(default=300.0, ge=10, le=3600)
     ffmpeg_timeout_seconds: float = Field(default=600.0, ge=10, le=3600)
     max_page_bytes: int = Field(default=8 * 1024 * 1024, ge=64 * 1024)

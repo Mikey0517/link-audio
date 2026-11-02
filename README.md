@@ -13,7 +13,7 @@
 - 粘贴**整段分享文案**即可提取，由 provider 注册表识别来源并提取链接。
 - 当前内置抖音、哔哩哔哩 provider；只允许各平台白名单域名，手动跟随跳转并逐跳校验，降低 SSRF 风险。
 - 抖音：移动端分享页、`_ROUTER_DATA` / `RENDER_DATA` 等内嵌 JSON，以及公开接口/备用页兜底。
-- 哔哩哔哩：解析 `b23.tv` 短链，调用公开的 view/playurl 接口，优先使用 DASH 音频流，失败时回退组合视频流抽轨。
+- 哔哩哔哩：解析 `b23.tv` 短链，调用公开的 view/playurl 接口，优先使用 DASH 音频流；接口超时会重试，接口不可用时回退到移动分享页 `__INITIAL_STATE__` 中的组合流，再由 FFmpeg 抽轨。
 - 平台无关的存储、下载、FFmpeg、Range 流式播放、前端播放器逻辑已经独立于抖音；数据库记录 `platform` 字段。
 - 自动区分**图文作品**和**视频作品**：
   - 图文：优先直接下载 `music.play_url.url_list` 的 MP3，正常路径不调用 FFmpeg。
@@ -417,7 +417,9 @@ docker compose restart
 | `MAX_DOWNLOAD_MB` | `500` | 单个下载/转码输出上限（MB） |
 | `MAX_CONCURRENT_EXTRACTIONS` | `2` | 单进程同时提取任务数 |
 | `QUEUE_TIMEOUT_SECONDS` | `45` | 并发满时排队超时，超时返回 429 |
-| `PAGE_TIMEOUT_SECONDS` | `20` | 请求分享页 / 平台接口的超时 |
+| `PAGE_TIMEOUT_SECONDS` | `20` | 请求分享页 HTML 的超时 |
+| `BILIBILI_API_TIMEOUT_SECONDS` | `30` | 哔哩哔哩 view/playurl 接口超时 |
+| `BILIBILI_API_RETRIES` | `2` | 哔哩哔哩接口网络失败重试次数 |
 | `DOWNLOAD_TIMEOUT_SECONDS` | `300` | 下载音频/视频的超时 |
 | `FFMPEG_TIMEOUT_SECONDS` | `600` | FFmpeg 子进程超时 |
 | `MAX_PAGE_BYTES` | `8388608` | 页面 HTML 最大读取体积 |
@@ -655,14 +657,14 @@ ruff check app tests
 ruff format --check app tests
 ```
 
-当前测试套件共 40 项，覆盖：
+当前测试套件共 43 项，覆盖：
 
 - 分享文案中的链接提取、抖音/哔哩哔哩域名识别、非支持域名拒绝；
 - provider 注册/分发、旧库 `platform` 字段迁移、同 ID 跨平台隔离；
 - 手动跟随短链、页面 JSON 网络层、iteminfo 兜底；
 - 流式下载、跳转、HTML 拦截、大小限制；
 - 抖音 `_ROUTER_DATA`、`RENDER_DATA`、目标 `aweme_id` 选择、图文/视频分类；
-- 哔哩哔哩 b23 跳转、view、DASH 音频和组合流兜底；
+- 哔哩哔哩 b23 跳转、view、DASH 音频、超时重试、组合流和移动页兜底；
 - 图文直链不调用 FFmpeg；
 - 视频音乐直链过短时回退 FFmpeg；
 - 视频音乐直链完整时直接采用；
@@ -795,7 +797,7 @@ sqlite3 data/music.db "SELECT id, platform, aweme_id, status, error_message FROM
 
 - 只允许当前 provider 的域名白名单作为入口，逐跳校验重定向；
 - DNS 解析到私网/回环/链路本地等地址时拒绝（`SSRF_DNS_CHECK=true`）；
-- 媒体 URL 只接受 http/https、标准端口、无认证信息；
+- 媒体 URL 只接受 http/https、标准端口或 provider 明确允许的媒体端口、无认证信息；
 - 最大 500 MB 下载/输出限制；
 - 并发提取限制与队列超时；
 - 所有外部请求设置超时；

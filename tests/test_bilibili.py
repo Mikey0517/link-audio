@@ -41,6 +41,33 @@ def test_extract_bilibili_short_link() -> None:
 
 
 @pytest.mark.asyncio
+async def test_bilibili_api_retries_transient_timeout(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    calls = {"view": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/x/web-interface/view":
+            calls["view"] += 1
+            if calls["view"] == 1:
+                raise httpx.ReadTimeout("simulated timeout", request=request)
+            return _json_response({"code": 0, "data": {"bvid": "BV1Dg4y1K7dN"}})
+        raise AssertionError(f"unexpected URL: {request.url}")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        provider = BilibiliProvider(settings, client, AllowAllValidator())  # type: ignore[arg-type]
+        payload = await provider._api_json(
+            "https://api.bilibili.com/x/web-interface/view?bvid=BV1Dg4y1K7dN",
+            label="view",
+        )
+    finally:
+        await client.aclose()
+
+    assert payload["code"] == 0
+    assert calls["view"] == 2
+
+
+@pytest.mark.asyncio
 async def test_bilibili_provider_parses_dash_audio(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
 
@@ -122,9 +149,123 @@ async def test_bilibili_provider_parses_dash_audio(tmp_path: Path) -> None:
     assert parsed.author == "测试 UP 主"
     assert parsed.duration_seconds == 316
     assert parsed.music_urls[0] == "https://cdn.example:8082/audio.m4s"
+    assert parsed.video_urls == ()
+    assert parsed.media_ports == (8081, 8082, 8083, 4483)
+    assert parsed.referer == "https://www.bilibili.com/"
+
+
+@pytest.mark.asyncio
+async def test_bilibili_provider_falls_back_to_combined_stream(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "b23.tv":
+            return httpx.Response(
+                302,
+                headers={"location": "https://www.bilibili.com/video/BV1Dg4y1K7dN"},
+            )
+        if request.url.path == "/x/web-interface/view":
+            return _json_response(
+                {
+                    "code": 0,
+                    "data": {
+                        "bvid": "BV1Dg4y1K7dN",
+                        "aid": 1,
+                        "cid": 2,
+                        "title": "无 DASH 音频",
+                        "duration": 10,
+                        "owner": {"name": "UP"},
+                        "pages": [{"cid": 2, "part": "", "duration": 10}],
+                    },
+                }
+            )
+        if request.url.path == "/x/player/playurl":
+            if request.url.params.get("fnval") == "16":
+                return _json_response({"code": 0, "data": {"dash": {"audio": []}}})
+            return _json_response(
+                {
+                    "code": 0,
+                    "data": {
+                        "durl": [
+                            {
+                                "url": "https://cdn.example:4483/video.mp4",
+                                "backup_url": "https://cdn.example:4483/video-2.mp4",
+                            }
+                        ]
+                    },
+                }
+            )
+        raise AssertionError(f"unexpected URL: {request.url}")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        provider = BilibiliProvider(settings, client, AllowAllValidator())  # type: ignore[arg-type]
+        parsed = await provider.parse("https://b23.tv/86lPuit")
+    finally:
+        await client.aclose()
+
+    assert parsed.music_urls == ()
     assert parsed.video_urls == (
         "https://cdn.example:4483/video.mp4",
         "https://cdn.example:4483/video-2.mp4",
     )
-    assert parsed.media_ports == (8081, 8082, 8083, 4483)
-    assert parsed.referer == "https://www.bilibili.com/"
+
+
+@pytest.mark.asyncio
+async def test_bilibili_provider_falls_back_to_mobile_page(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    state = {
+        "video": {
+            "viewInfo": {
+                "bvid": "BV1Dg4y1K7dN",
+                "aid": 1,
+                "cid": 2,
+                "title": "页面兜底",
+                "duration": 20,
+                "owner": {"name": "页面 UP"},
+                "pages": [{"cid": 2, "part": "", "duration": 20}],
+            },
+            "playUrlInfo": [
+                {
+                    "url": "https://cdn.example:4483/fallback.mp4",
+                    "backup_url": "https://cdn.example:4483/fallback-2.mp4",
+                }
+            ],
+        }
+    }
+    page_html = (
+        "<html><body><script>window.__INITIAL_STATE__="
+        + json.dumps(state, ensure_ascii=False)
+        + ";</script></body></html>"
+    ).encode()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "b23.tv":
+            return httpx.Response(
+                302,
+                headers={"location": "https://www.bilibili.com/video/BV1Dg4y1K7dN"},
+            )
+        if request.url.path == "/x/web-interface/view":
+            return httpx.Response(503, content=b"temporarily unavailable")
+        if request.url.path == "/video/BV1Dg4y1K7dN":
+            return httpx.Response(
+                200,
+                content=page_html,
+                headers={"content-type": "text/html; charset=utf-8"},
+            )
+        raise AssertionError(f"unexpected URL: {request.url}")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        provider = BilibiliProvider(settings, client, AllowAllValidator())  # type: ignore[arg-type]
+        parsed = await provider.parse("https://b23.tv/86lPuit")
+    finally:
+        await client.aclose()
+
+    assert parsed.title == "页面兜底"
+    assert parsed.author == "页面 UP"
+    assert parsed.music_urls == ()
+    assert parsed.video_urls == (
+        "https://cdn.example:4483/fallback.mp4",
+        "https://cdn.example:4483/fallback-2.mp4",
+    )

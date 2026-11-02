@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import html as html_lib
 import json
 import logging
@@ -200,8 +201,16 @@ class BilibiliProvider(BaseProvider):
             raise ParseError("未能识别哔哩哔哩视频 ID，页面结构可能已变化")
 
         page_number = _page_number(final_url)
-        view = await self._api_json(self._view_url(bvid=bvid, aid=aid))
-        data = view.get("data") or {}
+        page_media_urls: list[str] = []
+        api_available = True
+        try:
+            view = await self._api_json(self._view_url(bvid=bvid, aid=aid), label="view")
+            data = view.get("data") or {}
+        except AppError as exc:
+            logger.warning("哔哩哔哩 view 接口失败，尝试分享页兜底: %s", exc.message)
+            api_available = False
+            data, page_media_urls = await self._fetch_page_state(bvid)
+
         if not isinstance(data, dict) or not data:
             raise ParseError("哔哩哔哩接口未返回视频信息，作品可能不可见")
         bvid = str(data.get("bvid") or bvid or "")
@@ -230,38 +239,59 @@ class BilibiliProvider(BaseProvider):
 
         music_urls: list[str] = []
         video_urls: list[str] = []
-        dash_data = await self._api_json(self._playurl_url(bvid=bvid, aid=aid, cid=cid, fnval=16))
-        dash_payload = dash_data.get("data") or {}
-        dash = dash_payload.get("dash") if isinstance(dash_payload, dict) else {}
-        if isinstance(dash, dict):
-            audio_items = dash.get("audio") if isinstance(dash.get("audio"), list) else []
-            for item in sorted(
-                (x for x in audio_items if isinstance(x, dict)),
-                key=lambda x: int(x.get("bandwidth") or 0),
-                reverse=True,
-            ):
-                for key in ("baseUrl", "base_url"):
-                    for url in _url_list(item.get(key)):
-                        _append_unique(music_urls, url)
-                for key in ("backupUrl", "backup_url"):
-                    for url in _url_list(item.get(key)):
-                        _append_unique(music_urls, url)
-            if duration is None:
-                duration = _float_or_none(dash.get("duration"))
+        if api_available:
+            try:
+                dash_data = await self._api_json(
+                    self._playurl_url(bvid=bvid, aid=aid, cid=cid, fnval=16),
+                    label="DASH",
+                )
+                dash_payload = dash_data.get("data") or {}
+                dash = dash_payload.get("dash") if isinstance(dash_payload, dict) else {}
+                if isinstance(dash, dict):
+                    audio_items = dash.get("audio") if isinstance(dash.get("audio"), list) else []
+                    for item in sorted(
+                        (x for x in audio_items if isinstance(x, dict)),
+                        key=lambda x: int(x.get("bandwidth") or 0),
+                        reverse=True,
+                    ):
+                        for key in ("baseUrl", "base_url"):
+                            for url in _url_list(item.get(key)):
+                                _append_unique(music_urls, url)
+                        for key in ("backupUrl", "backup_url"):
+                            for url in _url_list(item.get(key)):
+                                _append_unique(music_urls, url)
+                    if duration is None:
+                        duration = _float_or_none(dash.get("duration"))
+            except AppError as exc:
+                logger.warning("哔哩哔哩 DASH 接口失败: %s", exc.message)
+                api_available = False
 
-        # A combined MP4/FLV stream is useful when the DASH audio endpoint is
-        # unavailable or the audio CDN rejects the request.
-        try:
-            combined = await self._api_json(self._playurl_url(bvid=bvid, aid=aid, cid=cid, fnval=1))
-            combined_data = combined.get("data") or {}
-            for item in combined_data.get("durl") or []:
-                if not isinstance(item, dict):
-                    continue
-                for key in ("url", "backup_url"):
-                    for url in _url_list(item.get(key)):
-                        _append_unique(video_urls, url)
-        except AppError as exc:
-            logger.debug("哔哩哔哩组合流获取失败: %s", exc.message)
+        # If the API host is unavailable, the mobile page still contains a
+        # combined MP4 URL in __INITIAL_STATE__. Use it as a rescue path.
+        if not api_available and not page_media_urls:
+            try:
+                _view_data, page_media_urls = await self._fetch_page_state(bvid)
+            except AppError as exc:
+                logger.warning("哔哩哔哩分享页兜底失败: %s", exc.message)
+
+        if not music_urls and not page_media_urls:
+            try:
+                combined = await self._api_json(
+                    self._playurl_url(bvid=bvid, aid=aid, cid=cid, fnval=1),
+                    label="组合流",
+                )
+                combined_data = combined.get("data") or {}
+                for item in combined_data.get("durl") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    for key in ("url", "backup_url"):
+                        for url in _url_list(item.get(key)):
+                            _append_unique(video_urls, url)
+            except AppError as exc:
+                logger.warning("哔哩哔哩组合流获取失败: %s", exc.message)
+
+        for url in page_media_urls:
+            _append_unique(video_urls, url)
 
         if not music_urls and not video_urls:
             raise NoAudioError("未找到哔哩哔哩音频流，作品可能需要登录、付费或版权限制")
@@ -289,6 +319,57 @@ class BilibiliProvider(BaseProvider):
             origin=BILIBILI_ORIGIN,
             media_ports=BILIBILI_MEDIA_PORTS,
         )
+
+    async def _fetch_page_state(self, bvid: str) -> tuple[dict[str, Any], list[str]]:
+        page_url = f"https://m.bilibili.com/video/{bvid}"
+        validate_bilibili_url(page_url)
+        await self._validator.validate(page_url)
+        headers = dict(self.headers)
+        headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        try:
+            async with self._http.stream(
+                "GET",
+                page_url,
+                headers=headers,
+                timeout=self._settings.page_timeout_seconds,
+                follow_redirects=False,
+            ) as response:
+                if response.status_code != 200:
+                    raise FetchError(
+                        "哔哩哔哩视频页请求失败",
+                        detail=f"upstream status={response.status_code}",
+                    )
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) > self._settings.max_page_bytes:
+                        raise FetchError("哔哩哔哩视频页体积异常")
+        except httpx.TimeoutException as exc:
+            raise FetchError("哔哩哔哩视频页请求超时") from exc
+        except httpx.RequestError as exc:
+            raise FetchError("无法连接哔哩哔哩视频页", detail=str(exc)) from exc
+
+        text = body.decode(response.encoding or "utf-8", errors="replace")
+        state = _initial_state(text)
+        video = state.get("video") if isinstance(state, dict) else None
+        if not isinstance(video, dict):
+            raise ParseError("哔哩哔哩视频页缺少初始状态数据")
+        view_info = video.get("viewInfo")
+        if not isinstance(view_info, dict):
+            raise ParseError("哔哩哔哩视频页缺少 viewInfo")
+        urls: list[str] = []
+        for item in video.get("playUrlInfo") or []:
+            if not isinstance(item, dict):
+                continue
+            for key in ("url", "backup_url"):
+                for url in _url_list(item.get(key)):
+                    _append_unique(urls, url)
+        logger.info(
+            "哔哩哔哩分享页兜底成功: bvid=%s 组合流=%d",
+            bvid,
+            len(urls),
+        )
+        return view_info, urls
 
     async def _resolve_share_url(self, url: str) -> str:
         current = url
@@ -351,44 +432,63 @@ class BilibiliProvider(BaseProvider):
             params["avid"] = aid
         return f"{API_BASE}/x/player/playurl?{urlencode(params)}"
 
-    async def _api_json(self, url: str) -> dict[str, Any]:
+    async def _api_json(self, url: str, *, label: str = "接口") -> dict[str, Any]:
         validate_bilibili_url(url)
         await self._validator.validate(url)
-        try:
-            async with self._http.stream(
-                "GET",
-                url,
-                headers=self.headers,
-                timeout=self._settings.page_timeout_seconds,
-                follow_redirects=False,
-            ) as response:
-                if response.status_code != 200:
+        attempts = self._settings.bilibili_api_retries
+        timeout = self._settings.bilibili_api_timeout_seconds
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                async with self._http.stream(
+                    "GET",
+                    url,
+                    headers=self.headers,
+                    timeout=timeout,
+                    follow_redirects=False,
+                ) as response:
+                    if response.status_code != 200:
+                        raise FetchError(
+                            f"哔哩哔哩{label}接口请求失败",
+                            detail=f"upstream status={response.status_code}",
+                        )
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        body.extend(chunk)
+                        if len(body) > self._settings.max_page_bytes:
+                            raise FetchError("哔哩哔哩接口响应过大")
+                try:
+                    payload = json.loads(body.decode("utf-8", errors="replace"))
+                except json.JSONDecodeError as exc:
+                    raise ParseError("哔哩哔哩接口返回了非 JSON 内容") from exc
+                code = payload.get("code")
+                if code != 0:
+                    message = str(payload.get("message") or "未知错误")
                     raise FetchError(
-                        "哔哩哔哩接口请求失败",
-                        detail=f"upstream status={response.status_code}",
+                        f"哔哩哔哩{label}接口返回错误：{message}",
+                        detail=f"api code={code}",
                     )
-                body = bytearray()
-                async for chunk in response.aiter_bytes():
-                    body.extend(chunk)
-                    if len(body) > self._settings.max_page_bytes:
-                        raise FetchError("哔哩哔哩接口响应过大")
-        except httpx.TimeoutException as exc:
-            raise FetchError("哔哩哔哩接口请求超时") from exc
-        except httpx.RequestError as exc:
-            raise FetchError("无法连接哔哩哔哩接口", detail=str(exc)) from exc
-
-        try:
-            payload = json.loads(body.decode("utf-8", errors="replace"))
-        except json.JSONDecodeError as exc:
-            raise ParseError("哔哩哔哩接口返回了非 JSON 内容") from exc
-        code = payload.get("code")
-        if code != 0:
-            message = str(payload.get("message") or "未知错误")
-            raise FetchError(
-                f"哔哩哔哩接口返回错误：{message}",
-                detail=f"api code={code}",
-            )
-        return payload
+                return payload
+            except (httpx.TimeoutException, httpx.RequestError) as exc:
+                last_error = exc
+                if attempt < attempts:
+                    logger.warning(
+                        "哔哩哔哩%s接口第 %d/%d 次请求失败，准备重试: %s",
+                        label,
+                        attempt,
+                        attempts,
+                        type(exc).__name__,
+                    )
+                    await asyncio.sleep(0.5 * attempt)
+                    continue
+                raise FetchError(
+                    f"哔哩哔哩{label}接口请求超时或网络失败（已尝试 {attempts} 次）",
+                    detail=str(exc),
+                ) from exc
+        raise FetchError(
+            f"哔哩哔哩{label}接口请求失败",
+            detail=str(last_error) if last_error else None,
+        )
 
 
 def _append_unique(urls: list[str], value: str) -> None:
@@ -404,6 +504,49 @@ def _float_or_none(value: Any) -> float | None:
     if number <= 0:
         return None
     return round(number, 3)
+
+
+def _initial_state(page_html: str) -> dict[str, Any]:
+    marker = "window.__INITIAL_STATE__"
+    marker_at = page_html.find(marker)
+    if marker_at < 0:
+        return {}
+    brace = page_html.find("{", marker_at + len(marker))
+    if brace < 0:
+        return {}
+    raw = _balanced_json(page_html, brace)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _balanced_json(text: str, start: int) -> str | None:
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return None
 
 
 def _safe_url(url: str) -> str:
